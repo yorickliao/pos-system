@@ -142,21 +142,19 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
     setModalNote("");
     setModalAddons({});
 
-    // ⭐️ 重點：判斷是哪個鍋，給不同的加料清單 ⭐️
+    // 判斷是哪個鍋，給不同的加料清單
     if (item.name === "牛雜鍋") {
-      setCurrentAddonsList(BEEF_OFFAL_ADDONS); // 使用牛雜專屬清單
+      setCurrentAddonsList(BEEF_OFFAL_ADDONS);
     } else {
-      setCurrentAddonsList(FULL_ADDONS_LIST);  // 其他鍋用完整清單
+      setCurrentAddonsList(FULL_ADDONS_LIST);
     }
 
-    // ⭐️ 重點：判斷泡菜鍋辣度 ⭐️
-    if (item.name.includes("泡菜鍋")) {
-      // 泡菜鍋：移除 "不辣"，預設選 "微辣"
+    // 判斷泡菜鍋辣度
+    if (item.name.includes("泡菜")) {
       const spicyOptions = ALL_SPICINESS.filter(opt => opt !== "不辣");
       setCurrentSpicinessOptions(spicyOptions);
       setModalSpiciness("微辣"); 
     } else {
-      // 一般鍋：全選，預設 "不辣"
       setCurrentSpicinessOptions(ALL_SPICINESS);
       setModalSpiciness("不辣");
     }
@@ -169,7 +167,6 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
     const addonsList = Object.entries(modalAddons)
       .filter(([_, qty]) => qty > 0)
       .map(([name, qty]) => {
-        // 注意：這裡要從 currentAddonsList 找價格，確保價格正確
         const addon = currentAddonsList.find(a => a.name === name);
         return { name, price: addon?.price || 0, quantity: qty };
       });
@@ -264,10 +261,11 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
         </div>
       )}
 
-      {/* --- 加購選單 (Modal) --- */}
+      {/* --- 加購選單 (Modal) 修復版 --- */}
       {isModalOpen && selectedItem && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm md:p-4 animate-fade-in">
           
+          {/* 修正這裡：高度改為 h-[93dvh] 讓它更長，幾乎貼頂 */}
           <div className="bg-white w-full max-w-2xl rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[93dvh] md:h-auto md:max-h-[90vh] animate-slide-up">
             
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10 flex-shrink-0">
@@ -286,7 +284,7 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
                 </div>
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-700 mb-3">加點配料 (單點)</h3>
+                <h3 className="text-lg font-bold text-slate-700 mb-3">加點配料</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {currentAddonsList.map(addon => {
                     const qty = modalAddons[addon.name] || 0;

@@ -231,15 +231,21 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
         </div>
       )}
 
-      {/* --- 加購選單 (Modal) --- */}
+      {/* --- 加購選單 (Modal) 修復版 --- */}
       {isModalOpen && selectedItem && (
-        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-slide-up">
-            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
+        // 修正點 1: 移除 p-4 padding，讓手機版可以貼邊。 修正點 2: 使用 items-end (靠下)
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm md:p-4 animate-fade-in">
+          
+          {/* 修正點 3: 高度設為 h-[85dvh] (動態視窗高度)，並將 rounded-t-2xl 應用於手機 */}
+          <div className="bg-white w-full max-w-2xl rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[85dvh] md:h-auto md:max-h-[90vh] animate-slide-up">
+            
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10 flex-shrink-0">
               <h2 className="text-2xl font-black text-slate-800">{selectedItem.name}</h2>
               <button onClick={() => setIsModalOpen(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={24} className="text-gray-600" /></button>
             </div>
-            <div className="p-6 overflow-y-auto space-y-8">
+            
+            {/* 中間捲動區 */}
+            <div className="p-6 overflow-y-auto space-y-8 flex-1">
               <div>
                 <h3 className="text-lg font-bold text-slate-700 mb-3">選擇辣度</h3>
                 <div className="flex flex-wrap gap-3">
@@ -271,7 +277,9 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
                 <div className="flex items-center justify-between bg-gray-50 p-4 rounded-xl"><span className="font-bold text-lg text-slate-700">份數</span><div className="flex items-center gap-4 bg-white px-4 py-2 rounded-lg shadow-sm border border-gray-200"><button onClick={() => setModalQuantity(Math.max(1, modalQuantity - 1))} className="text-gray-600 hover:text-blue-600"><Minus /></button><span className="text-xl font-black text-slate-800 w-8 text-center">{modalQuantity}</span><button onClick={() => setModalQuantity(modalQuantity + 1)} className="text-gray-600 hover:text-blue-600"><Plus /></button></div></div>
               </div>
             </div>
-            <div className="p-4 border-t border-gray-100 bg-white sticky bottom-0 z-10 flex justify-between items-center gap-4">
+
+            {/* Modal Footer (固定底部) */}
+            <div className="p-4 border-t border-gray-100 bg-white sticky bottom-0 z-10 flex justify-between items-center gap-4 pb-8 md:pb-4 flex-shrink-0">
               <div className="flex flex-col"><span className="text-xs text-gray-500 font-bold">小計</span><span className="text-2xl font-black text-slate-900">${ (selectedItem.price + Object.entries(modalAddons).reduce((acc, [name, q]) => acc + (ADDONS_LIST.find(a=>a.name===name)?.price||0)*q, 0)) * modalQuantity }</span></div>
               <button onClick={confirmModalAdd} className="flex-1 bg-slate-900 text-white py-4 rounded-xl font-bold text-lg hover:bg-black transition shadow-lg">加入購物車</button>
             </div>
@@ -320,7 +328,7 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
         </button>
       </div>
 
-      {/* --- 右側：結帳區 (關鍵修復：Desktop 使用 static/relative 佈局，Mobile 使用 fixed modal) --- */}
+      {/* --- 右側：結帳區 --- */}
       <div className={`
         fixed inset-0 z-50 bg-white transition-transform duration-300 transform 
         md:relative md:transform-none md:w-1/3 md:flex md:flex-col md:h-full md:z-auto md:shadow-2xl md:border-l md:border-slate-200 md:inset-auto md:translate-y-0

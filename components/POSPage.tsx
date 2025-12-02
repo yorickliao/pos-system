@@ -23,8 +23,8 @@ type CartItem = MenuItem & {
   finalPrice: number;
 };
 
-// --- 加料清單 ---
-const ADDONS_LIST = [
+// --- 1. 定義「通用」加料清單 ---
+const FULL_ADDONS_LIST = [
   { name: "蟹肉棒", price: 20 }, { name: "鱈魚丸", price: 20 },
   { name: "北海翅", price: 20 }, { name: "鑫鑫腸", price: 20 },
   { name: "金針菇", price: 10 }, { name: "臭豆腐", price: 20 },
@@ -37,7 +37,16 @@ const ADDONS_LIST = [
   { name: "冬粉",   price: 10 }, { name: "白飯",   price: 10 },
 ];
 
-const SPICINESS_OPTIONS = ["不辣", "微辣", "小辣", "中辣", "大辣"];
+// --- 2. 定義「牛雜鍋專屬」加料清單 (依照截圖) ---
+const BEEF_OFFAL_ADDONS = [
+  { name: "金針菇", price: 10 },
+  { name: "臭豆腐", price: 20 },
+  { name: "鴨血",   price: 20 },
+  { name: "豆皮",   price: 30 },
+  { name: "高麗菜", price: 20 },
+];
+
+const ALL_SPICINESS = ["不辣", "微辣", "小辣", "中辣", "大辣"];
 
 export default function POSPage({ menuItems, categories }: { menuItems: MenuItem[], categories: Category[] }) {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -61,6 +70,10 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
   const [modalSpiciness, setModalSpiciness] = useState("不辣");
   const [modalNote, setModalNote] = useState("");
   const [modalAddons, setModalAddons] = useState<{[key: string]: number}>({});
+
+  // 動態選項狀態
+  const [currentSpicinessOptions, setCurrentSpicinessOptions] = useState<string[]>([]);
+  const [currentAddonsList, setCurrentAddonsList] = useState(FULL_ADDONS_LIST);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -126,9 +139,28 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
   const openModal = (item: MenuItem) => {
     setSelectedItem(item);
     setModalQuantity(1);
-    setModalSpiciness("不辣");
     setModalNote("");
     setModalAddons({});
+
+    // ⭐️ 重點：判斷是哪個鍋，給不同的加料清單 ⭐️
+    if (item.name === "牛雜鍋") {
+      setCurrentAddonsList(BEEF_OFFAL_ADDONS); // 使用牛雜專屬清單
+    } else {
+      setCurrentAddonsList(FULL_ADDONS_LIST);  // 其他鍋用完整清單
+    }
+
+    // ⭐️ 重點：判斷泡菜鍋辣度 ⭐️
+    if (item.name.includes("泡菜鍋")) {
+      // 泡菜鍋：移除 "不辣"，預設選 "微辣"
+      const spicyOptions = ALL_SPICINESS.filter(opt => opt !== "不辣");
+      setCurrentSpicinessOptions(spicyOptions);
+      setModalSpiciness("微辣"); 
+    } else {
+      // 一般鍋：全選，預設 "不辣"
+      setCurrentSpicinessOptions(ALL_SPICINESS);
+      setModalSpiciness("不辣");
+    }
+
     setIsModalOpen(true);
   };
 
@@ -137,7 +169,8 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
     const addonsList = Object.entries(modalAddons)
       .filter(([_, qty]) => qty > 0)
       .map(([name, qty]) => {
-        const addon = ADDONS_LIST.find(a => a.name === name);
+        // 注意：這裡要從 currentAddonsList 找價格，確保價格正確
+        const addon = currentAddonsList.find(a => a.name === name);
         return { name, price: addon?.price || 0, quantity: qty };
       });
     const addonsTotal = addonsList.reduce((sum, a) => sum + (a.price * a.quantity), 0);
@@ -231,13 +264,11 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
         </div>
       )}
 
-      {/* --- 加購選單 (Modal) 修復版 --- */}
+      {/* --- 加購選單 (Modal) --- */}
       {isModalOpen && selectedItem && (
-        // 修正點 1: 移除 p-4 padding，讓手機版可以貼邊。 修正點 2: 使用 items-end (靠下)
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm md:p-4 animate-fade-in">
           
-          {/* 修正點 3: 高度設為 h-[85dvh] (動態視窗高度)，並將 rounded-t-2xl 應用於手機 */}
-          <div className="bg-white w-full max-w-2xl rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[85dvh] md:h-auto md:max-h-[90vh] animate-slide-up">
+          <div className="bg-white w-full max-w-2xl rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[93dvh] md:h-auto md:max-h-[90vh] animate-slide-up">
             
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10 flex-shrink-0">
               <h2 className="text-2xl font-black text-slate-800">{selectedItem.name}</h2>
@@ -249,15 +280,15 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
               <div>
                 <h3 className="text-lg font-bold text-slate-700 mb-3">選擇辣度</h3>
                 <div className="flex flex-wrap gap-3">
-                  {SPICINESS_OPTIONS.map(spicy => (
+                  {currentSpicinessOptions.map(spicy => (
                     <button key={spicy} onClick={() => setModalSpiciness(spicy)} className={`px-4 py-2 rounded-lg border font-bold transition-all ${modalSpiciness === spicy ? "bg-red-500 text-white border-red-500 shadow-md transform scale-105" : "bg-white text-gray-600 border-gray-200 hover:border-red-300"}`}>{spicy}</button>
                   ))}
                 </div>
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-700 mb-3">加點配料</h3>
+                <h3 className="text-lg font-bold text-slate-700 mb-3">加點配料 (單點)</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {ADDONS_LIST.map(addon => {
+                  {currentAddonsList.map(addon => {
                     const qty = modalAddons[addon.name] || 0;
                     return (
                       <div key={addon.name} className={`flex justify-between items-center p-3 rounded-xl border transition-all ${qty > 0 ? "border-blue-500 bg-blue-50" : "border-gray-100 bg-white"}`}>
@@ -280,7 +311,7 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
 
             {/* Modal Footer (固定底部) */}
             <div className="p-4 border-t border-gray-100 bg-white sticky bottom-0 z-10 flex justify-between items-center gap-4 pb-8 md:pb-4 flex-shrink-0">
-              <div className="flex flex-col"><span className="text-xs text-gray-500 font-bold">小計</span><span className="text-2xl font-black text-slate-900">${ (selectedItem.price + Object.entries(modalAddons).reduce((acc, [name, q]) => acc + (ADDONS_LIST.find(a=>a.name===name)?.price||0)*q, 0)) * modalQuantity }</span></div>
+              <div className="flex flex-col"><span className="text-xs text-gray-500 font-bold">小計</span><span className="text-2xl font-black text-slate-900">${ (selectedItem.price + Object.entries(modalAddons).reduce((acc, [name, q]) => acc + (currentAddonsList.find(a=>a.name===name)?.price||0)*q, 0)) * modalQuantity }</span></div>
               <button onClick={confirmModalAdd} className="flex-1 bg-slate-900 text-white py-4 rounded-xl font-bold text-lg hover:bg-black transition shadow-lg">加入購物車</button>
             </div>
           </div>

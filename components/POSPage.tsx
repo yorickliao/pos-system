@@ -147,7 +147,7 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
         <div className="absolute top-0 left-0 right-0 z-10 bg-slate-100/80 backdrop-blur-md border-b border-slate-200 pt-4 pb-2 px-6">
           <div className="flex items-center gap-2 mb-4">
             <ChefHat className="text-blue-600" />
-            <h1 className="text-xl font-black text-slate-800 tracking-tight">美味點餐系統</h1>
+            <h1 className="text-xl font-black text-slate-800 tracking-tight">326臭臭鍋 線上點餐</h1>
           </div>
           
           <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2">

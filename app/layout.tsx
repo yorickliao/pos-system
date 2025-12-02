@@ -10,8 +10,8 @@ const notoSansTC = Noto_Sans_TC({
 });
 
 export const metadata: Metadata = {
-  title: "POS 點餐系統",
-  description: "Next.js POS System",
+  title: "326點餐系統",
+  description: "326 pos",
 };
 
 export default function RootLayout({

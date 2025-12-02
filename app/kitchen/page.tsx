@@ -154,7 +154,7 @@ function KitchenContent() {
       {/* 頂部導覽列 */}
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-4">
-          <h1 className="text-3xl font-bold text-yellow-400">👨‍🍳 廚房接單系統</h1>
+          <h1 className="text-3xl font-bold text-yellow-400">326訂單管理</h1>
           <span className="bg-gray-700 px-3 py-1 rounded-full text-sm text-gray-300">
             待處理: {orders.length}
           </span>

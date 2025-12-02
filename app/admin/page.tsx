@@ -97,7 +97,7 @@ function AdminContent() {
         
         {/* 標題與營業開關 */}
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-black">🛠️ 餐廳後台管理</h1>
+          <h1 className="text-3xl font-bold text-black">326後台</h1>
           
           <button
             onClick={toggleStoreStatus}

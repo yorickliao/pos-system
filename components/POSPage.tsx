@@ -306,7 +306,7 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
             </div>
 
             {/* Modal Footer (增加 pb-14) */}
-            <div className="p-4 border-t border-gray-100 bg-white sticky bottom-0 z-10 flex justify-between items-center gap-4 pb-16 md:pb-4 flex-shrink-0">
+            <div className="p-4 border-t border-gray-100 bg-white sticky bottom-0 z-10 flex justify-between items-center gap-4 pb-14 md:pb-4 flex-shrink-0">
               <div className="flex flex-col"><span className="text-xs text-gray-500 font-bold">小計</span><span className="text-2xl font-black text-slate-900">${ (selectedItem.price + Object.entries(modalAddons).reduce((acc, [name, q]) => acc + (currentAddonsList.find(a=>a.name===name)?.price||0)*q, 0)) * modalQuantity }</span></div>
               <button onClick={confirmModalAdd} className="flex-1 bg-slate-900 text-white py-4 rounded-xl font-bold text-lg hover:bg-black transition shadow-lg">加入購物車</button>
             </div>
@@ -415,7 +415,7 @@ export default function POSPage({ menuItems, categories }: { menuItems: MenuItem
             )}
           </div>
 
-          <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-30 flex-shrink-0 pb-14 md:pb-6">
+          <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-30 flex-shrink-0 pb-18 md:pb-6">
             <div className="flex justify-between items-end mb-6"><span className="text-slate-500 font-bold text-sm">訂單總金額</span><div className="flex items-baseline gap-1"><span className="text-4xl font-black text-slate-900">${totalAmount}</span></div></div>
             <button onClick={handleCheckout} disabled={cart.length === 0 || isLoading || !isStoreOpen} className={`w-full py-4 rounded-2xl text-xl font-bold shadow-xl shadow-blue-200 transition-all transform active:scale-[0.98] flex items-center justify-center gap-3 ${cart.length === 0 || isLoading || !isStoreOpen ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : diningOption === 'take_out' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:shadow-green-200' : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-blue-200'}`}>{isLoading ? "處理中..." : diningOption === 'take_out' ? "確認外帶" : "確認內用"}</button>
           </div>

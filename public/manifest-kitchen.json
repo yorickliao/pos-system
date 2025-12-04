@@ -1,0 +1,12 @@
+{
+  "name": "326 廚房",
+  "short_name": "廚房",
+  "start_url": "/kitchen", 
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ff9800",
+  "icons": [
+    { "src": "/icons/icon-kitchen-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/icons/icon-kitchen-512.png", "type": "image/png", "sizes": "512x512" }
+  ]
+}

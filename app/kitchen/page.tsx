@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import PinGuard from "@/components/PinGuard";
 import { History, X, Trash2, Undo2, Search, CheckCircle2 } from "lucide-react";
+import StoreOpenToggle from "@/components/StoreOpenToggle";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -50,6 +51,8 @@ function parseOptions(raw: any): ItemOptions | null {
 
 const CAPACITY_PER_SLOT = 7;
 const SLOT_MINUTES = 15;
+const DAILY_BEEF_OFFAL_LIMIT = 50;
+const BEEF_OFFAL_NAME = "牛雜鍋";
 
 // 營業時段（依你規則固定 16:30–20:30，每 15 分鐘）
 const SERVICE_START = { hh: 16, mm: 30 };
@@ -333,6 +336,25 @@ function KitchenContent() {
   }, [filteredOrders, slots, selectedDate]);
 
   const pendingCount = orders.filter((o) => o.status === "pending").length;
+  const stats = useMemo(() => {
+    const orderCount = orders.length;
+
+    const totalPots = orders.reduce((acc, o) => acc + computePots(o), 0);
+
+    const totalSales = orders.reduce((acc, o) => acc + Number(o.total_amount || 0), 0);
+
+    const beefSold = orders.reduce((acc, o) => {
+      const n = (o.order_items || []).reduce((sum, it) => {
+        if ((it.item_name || "") === BEEF_OFFAL_NAME) return sum + Number(it.quantity || 0);
+        return sum;
+      }, 0);
+      return acc + n;
+    }, 0);
+
+    const beefRemaining = Math.max(0, DAILY_BEEF_OFFAL_LIMIT - beefSold);
+
+    return { orderCount, totalPots, totalSales, beefSold, beefRemaining };
+  }, [orders]);
 
   return (
     <div className="min-h-screen bg-gray-900 p-6 text-white font-sans relative">
@@ -355,12 +377,40 @@ function KitchenContent() {
               已完成訂單
             </button>
 
-            <div className="flex items-center gap-2 text-green-400">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-              </span>
-              即時連線中
+            <div className="flex items-center gap-4">
+              <StoreOpenToggle />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* 訂單數 */}
+          <div className="bg-gray-800/60 border border-gray-700 rounded-2xl p-5">
+            <div className="text-sm font-bold text-gray-300">訂單數</div>
+            <div className="mt-2 text-4xl font-black text-white">{stats.orderCount}</div>
+          </div>
+
+          {/* 總火鍋等效數 */}
+          <div className="bg-gray-800/60 border border-gray-700 rounded-2xl p-5">
+            <div className="text-sm font-bold text-gray-300">總火鍋等效數</div>
+            <div className="mt-2 text-4xl font-black text-white">{stats.totalPots}</div>
+          </div>
+
+          {/* 銷售金額 */}
+          <div className="bg-gray-800/60 border border-gray-700 rounded-2xl p-5">
+            <div className="text-sm font-bold text-gray-300">銷售金額</div>
+            <div className="mt-2 text-4xl font-black text-white">
+              ${stats.totalSales.toLocaleString("zh-TW")}
+            </div>
+          </div>
+
+          {/* 牛雜鍋剩餘 */}
+          <div className="bg-gray-800/60 border border-gray-700 rounded-2xl p-5">
+            <div className="text-sm font-bold text-gray-300">牛雜鍋剩餘</div>
+            <div className="mt-2 text-4xl font-black text-white">
+              {stats.beefRemaining} / {DAILY_BEEF_OFFAL_LIMIT}
+            </div>
+            <div className="mt-2 text-sm font-bold text-gray-400">
+              已售 {stats.beefSold} 份
             </div>
           </div>
         </div>

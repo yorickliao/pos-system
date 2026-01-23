@@ -43,6 +43,9 @@ type CartItem = MenuItem & {
 
 type TimeSlot = { value: string; label: string; disabled: boolean; used: number; remaining: number; hhmm: string };
 const CAPACITY_PER_SLOT = 7;
+const DAILY_BEEF_OFFAL_LIMIT = 50;
+const BEEF_OFFAL_NAME = "牛雜鍋";
+
 
 // --- 1. 定義「通用」加料清單 ---
 const FULL_ADDONS_LIST = [
@@ -173,20 +176,33 @@ function getActiveBookingServiceDate(now: Date) {
   return { isOpen: false, serviceDate: null as Date | null };
 }
 
-function buildPickupSlotsForServiceDate(serviceDate: Date, usage: Record<string, number>) {
+function buildPickupSlotsForServiceDate(
+  serviceDate: Date,
+  usage: Record<string, number>,
+  now: Date
+) {
   const dateKey = dateKeyLocal(serviceDate);
   const start = new Date(`${dateKey}T16:30:00`);
   const end = new Date(`${dateKey}T20:30:00`);
 
+  const nowKey = dateKeyLocal(now);
+  const isSameDay = nowKey === dateKey; // 只有 serviceDate 是今天才限制
+
   const slots: TimeSlot[] = [];
   for (let d = new Date(start); d <= end; d = new Date(d.getTime() + 15 * 60 * 1000)) {
-    const k = hhmmKey(d);           // "16:30"
+    const k = hhmmKey(d); // "16:30"
+
     const used = usage[k] || 0;
     const remaining = Math.max(0, CAPACITY_PER_SLOT - used);
-    const disabled = remaining <= 0;
+    const full = remaining <= 0;
+
+    // ✅ 只有 serviceDate 是「今天」才禁選早於現在的時段（週三/週六當天）
+    const past = isSameDay && d.getTime() < now.getTime();
+
+    const disabled = full || past;
 
     slots.push({
-      value: toLocalTimestampString(d), // 存入 DB 的 pickup_time
+      value: toLocalTimestampString(d),
       hhmm: k,
       used,
       remaining,
@@ -196,6 +212,7 @@ function buildPickupSlotsForServiceDate(serviceDate: Date, usage: Record<string,
   }
   return slots;
 }
+
 
 
 function hhmmKey(d: Date) {
@@ -215,6 +232,42 @@ function computePotsFromOrderItems(items: { item_name: string; quantity: number 
   return pots;
 }
 
+async function fetchUsedPotsForSlot(serviceDateKey: string, hhmm: string) {
+  const from = `${serviceDateKey}T00:00:00`;
+  const d = new Date(`${serviceDateKey}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  const to = `${dateKeyLocal(d)}T00:00:00`;
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(
+      `
+      pickup_time, status,
+      order_items ( item_name, quantity )
+    `
+    )
+    .gte("pickup_time", from)
+    .lt("pickup_time", to)
+    .in("status", ["pending", "served"]);
+
+  if (error) throw error;
+
+  let used = 0;
+
+  for (const o of (data as any[]) || []) {
+    if (!o.pickup_time) continue;
+    const dt = safeParseDate(o.pickup_time);
+    if (!dt) continue;
+
+    const k = hhmmKey(dt);
+    if (k !== hhmm) continue;
+
+    used += computePotsFromOrderItems(o.order_items || []);
+  }
+
+  return used; // 這個 hhmm 的已用鍋數（DB 即時）
+}
+
 async function fetchSlotUsageForServiceDate(serviceDateKey: string) {
   const from = `${serviceDateKey}T00:00:00`;
   const d = new Date(`${serviceDateKey}T00:00:00`);
@@ -231,24 +284,35 @@ async function fetchSlotUsageForServiceDate(serviceDateKey: string) {
     )
     .gte("pickup_time", from)
     .lt("pickup_time", to)
-    .in("status", ["pending", "served"]); // 容量通常要把已完成也算進去，避免超賣
+    .in("status", ["pending", "served"]);
 
   if (error) throw error;
 
   const usage: Record<string, number> = {};
+  let beefUsed = 0;
+
   for (const o of (data as any[]) || []) {
     if (!o.pickup_time) continue;
     const dt = safeParseDate(o.pickup_time);
     if (!dt) continue;
 
-    // 你的 pickup_time 本來就是 15 分鐘格，這裡直接取 HH:mm
     const k = hhmmKey(dt);
+
+    // 時段鍋數
     const pots = computePotsFromOrderItems(o.order_items || []);
     usage[k] = (usage[k] || 0) + pots;
+
+    // 牛雜鍋日總量（用 quantity 累加）
+    for (const it of o.order_items || []) {
+      if ((it.item_name || "") === BEEF_OFFAL_NAME) {
+        beefUsed += Number(it.quantity || 0);
+      }
+    }
   }
 
-  return usage;
+  return { usage, beefOffalUsed: beefUsed };
 }
+
 
 
 
@@ -289,7 +353,10 @@ export default function POSPage({
     {}
   );
   const [successOpen, setSuccessOpen] = useState(false);
-  const [successText, setSuccessText] = useState(""); 
+  const [successText, setSuccessText] = useState("");
+  const [beefOffalUsed, setBeefOffalUsed] = useState(0);
+  const beefOffalRemaining = Math.max(0, DAILY_BEEF_OFFAL_LIMIT - beefOffalUsed);
+
 
   // 動態選項狀態
   const [currentSpicinessOptions, setCurrentSpicinessOptions] = useState<
@@ -298,6 +365,69 @@ export default function POSPage({
   const [currentAddonsList, setCurrentAddonsList] =
     useState(FULL_ADDONS_LIST);
 
+  // 公告彈窗
+  const ANNOUNCE_KEY = "pos_announcement_v1"; // 內容改了就換 v2
+  // 公告彈窗（打開頁面顯示一次；打烊時不顯示）
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
+  const [didInitAnnouncement, setDidInitAnnouncement] = useState(false);
+
+  useEffect(() => {
+    // 等店家狀態讀到之後，只做一次初始化
+    if (didInitAnnouncement) return;
+
+    if (isStoreOpen) {
+      setShowAnnouncement(true);
+    } else {
+      setShowAnnouncement(false);
+    }
+    setDidInitAnnouncement(true);
+  }, [isStoreOpen, didInitAnnouncement]);
+
+  useEffect(() => {
+    // 若營業中->打烊，強制把公告關掉（確保遮罩下看不到）
+    if (!isStoreOpen) setShowAnnouncement(false);
+  }, [isStoreOpen]);
+
+  const closeAnnouncement = () => setShowAnnouncement(false);
+
+
+  // 讀取店家營業狀態（store_settings.id=1）
+  const fetchStoreOpen = async () => {
+    const { data, error } = await supabase
+      .from("store_settings")
+      .select("is_open")
+      .eq("id", 1)
+      .single();
+
+    if (error) {
+      console.error("讀取店家狀態失敗:", error);
+      return;
+    }
+    setIsStoreOpen(!!data?.is_open);
+  };
+
+  useEffect(() => {
+    // 初次進來先讀一次
+    fetchStoreOpen();
+
+    // 即時監聽 store_settings 變化（跟 kitchen 同步）
+    const channel = supabase
+      .channel("store-settings-watch")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "store_settings", filter: "id=eq.1" },
+        (payload) => {
+          const next = (payload.new as any)?.is_open;
+          if (typeof next === "boolean") setIsStoreOpen(next);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+    
   useEffect(() => {
   let alive = true;
 
@@ -312,23 +442,33 @@ export default function POSPage({
       setServiceDateKey(key);
 
       try {
-        const usage = await fetchSlotUsageForServiceDate(key);
+        const res = await fetchSlotUsageForServiceDate(key);
         if (!alive) return;
-        setSlotUsage(usage);
 
-        const slots = buildPickupSlotsForServiceDate(serviceDate, usage);
+        setSlotUsage(res.usage);
+        setBeefOffalUsed(res.beefOffalUsed);
+
+        const slots = buildPickupSlotsForServiceDate(serviceDate, res.usage, now);
         setTimeSlots(slots);
 
-        // 如果原本選的 pickupTime 不在 slots 內 或已滿，就清掉
         if (pickupTime) {
           const found = slots.find((s) => s.value === pickupTime);
           if (!found || found.disabled) setPickupTime("");
         }
       } catch (e) {
         console.error(e);
-        // 查不到 usage 時仍給 slots（不禁選）
-        const slots = buildPickupSlotsForServiceDate(serviceDate, {});
+
+        // ✅ fallback：查不到 usage 時，就當作全部 0
+        setSlotUsage({});
+        setBeefOffalUsed(0);
+
+        const slots = buildPickupSlotsForServiceDate(serviceDate, {}, now);
         setTimeSlots(slots);
+
+        if (pickupTime) {
+          const found = slots.find((s) => s.value === pickupTime);
+          if (!found || found.disabled) setPickupTime("");
+        }
       }
     } else {
       setServiceDateKey("");
@@ -355,40 +495,58 @@ export default function POSPage({
   }, [selectedCategory, categories]);
 
   // --- 點擊商品 ---
-  const handleItemClick = (item: MenuItem) => {
+  const handleItemClick = async (item: MenuItem) => {
     if (!isStoreOpen) return alert("抱歉，目前暫停接單");
     if (!item.is_available) return;
 
-    // 判斷是否為主食/單點/飲料 (不用選配料)
-    const categoryName =
-      categories.find((c) => c.id === item.category_id)?.name || "";
+    if (item.name === BEEF_OFFAL_NAME && beefOffalUsed >= DAILY_BEEF_OFFAL_LIMIT) {
+      return alert(`抱歉，${BEEF_OFFAL_NAME} 今日限量 ${DAILY_BEEF_OFFAL_LIMIT} 鍋，已售完`);
+    }
+
+    // ✅ 用 DB 即時擋：只要是「鍋」類，先擋容量
+    if (pickupTime && (item.name || "").includes("鍋")) {
+      const ok = await guardSlotCapacityOrAlert(1);
+      if (!ok) return;
+    }
+
+    const categoryName = categories.find((c) => c.id === item.category_id)?.name || "";
     const isSimpleItem =
       categoryName.includes("主食") ||
       categoryName.includes("單點") ||
       categoryName.includes("飲料");
 
-    if (isSimpleItem) {
-      addToCartDirectly(item);
-    } else {
-      openModal(item);
-    }
+    if (isSimpleItem) addToCartDirectly(item);
+    else openModal(item);
   };
+
 
   const addToCartDirectly = (item: MenuItem) => {
     setCart((prevCart) => {
+      // ✅ 強制用 prevCart 算，才能擋住快速連點
+      if (pickupTime && (item.name || "").includes("鍋")) {
+        const remain = selectedSlotRemaining ?? 0; // 這個 remain 是該時段「剩餘容量」
+        const prevPots = countPotsInCart(prevCart); // ✅ prevCart 當下的鍋數
+
+        if (prevPots + 1 > remain) {
+          alert(fullSlotMsg(pickupTime));
+          return prevCart; // ✅ 不加進去
+        }
+      }
+
       const existingItemIndex = prevCart.findIndex(
-        (i) =>
-          i.id === item.id && (!i.options || Object.keys(i.options).length === 0)
+        (i) => i.id === item.id && (!i.options || Object.keys(i.options).length === 0)
       );
+
       if (existingItemIndex > -1) {
         const newCart = [...prevCart];
         newCart[existingItemIndex].quantity += 1;
         return newCart;
-      } else {
-        return [...prevCart, { ...item, quantity: 1, finalPrice: item.price }];
       }
+
+      return [...prevCart, { ...item, quantity: 1, finalPrice: item.price }];
     });
   };
+
 
   const openModal = (item: MenuItem) => {
     setSelectedItem(item);
@@ -414,29 +572,60 @@ export default function POSPage({
     setIsModalOpen(true);
   };
 
-  const confirmModalAdd = () => {
-    if (!selectedItem) return;
+  const confirmModalAdd = async () => {
+      if (!selectedItem) return;
+
+      // ✅ 用 DB 即時擋：一次加 modalQuantity
+      if (pickupTime && (selectedItem.name || "").includes("鍋")) {
+        const ok = await guardSlotCapacityOrAlert(modalQuantity);
+        if (!ok) return;
+      }
+
+      // 牛雜鍋日限量
+      if (
+        selectedItem.name === BEEF_OFFAL_NAME &&
+        beefOffalUsed + modalQuantity > DAILY_BEEF_OFFAL_LIMIT
+      ) {
+        const remain = Math.max(0, DAILY_BEEF_OFFAL_LIMIT - beefOffalUsed);
+        alert(`抱歉，${BEEF_OFFAL_NAME} 今日剩餘 ${remain} 鍋`);
+        return;
+      }
+
     const addonsList = Object.entries(modalAddons)
       .filter(([_, qty]) => qty > 0)
       .map(([name, qty]) => {
         const addon = currentAddonsList.find((a) => a.name === name);
         return { name, price: addon?.price || 0, quantity: qty };
       });
-    const addonsTotal = addonsList.reduce(
-      (sum, a) => sum + a.price * a.quantity,
-      0
-    );
+
+    const addonsTotal = addonsList.reduce((sum, a) => sum + a.price * a.quantity, 0);
     const finalPrice = selectedItem.price + addonsTotal;
 
     const newItem: CartItem = {
       ...selectedItem,
       quantity: modalQuantity,
-      finalPrice: finalPrice,
+      finalPrice,
       options: { spiciness: modalSpiciness, note: modalNote, addons: addonsList },
     };
-    setCart((prev) => [...prev, newItem]);
+
+    setCart((prevCart) => {
+      // ✅ 強制用 prevCart 算，才能擋住「一次加 7 份」或連點確認
+      if (pickupTime && (selectedItem.name || "").includes("鍋")) {
+        const remain = selectedSlotRemaining ?? 0;
+        const prevPots = countPotsInCart(prevCart);
+
+        if (prevPots + modalQuantity > remain) {
+          alert(fullSlotMsg(pickupTime));
+          return prevCart; // ✅ 不加
+        }
+      }
+
+      return [...prevCart, newItem];
+    });
+
     setIsModalOpen(false);
   };
+
 
   const updateAddonQty = (name: string, delta: number) => {
     setModalAddons((prev) => {
@@ -453,6 +642,63 @@ export default function POSPage({
   const removeFromCart = (index: number) => {
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
+  function slotKeyFromPickupTime(pickupTime: string) {
+    const dt = safeParseDate(pickupTime);
+    if (!dt) return "";
+    return hhmmKey(dt); // "HH:mm"
+  }
+
+  function countPotsInCart(items: CartItem[]) {
+    return items.reduce((acc, it) => {
+      if ((it.name || "").includes("鍋")) return acc + Number(it.quantity || 0);
+      return acc;
+    }, 0);
+  }
+  // 購物車內「鍋」數（品名包含「鍋」才算）
+  const cartPots = useMemo(() => {
+    return cart.reduce((acc, it) => {
+      if ((it.name || "").includes("鍋")) return acc + Number(it.quantity || 0);
+      return acc;
+    }, 0);
+  }, [cart]);
+
+  // 目前選的取餐時段剩餘容量（若未選時段就回 null）
+  const selectedSlotRemaining = useMemo(() => {
+    if (!pickupTime) return null;
+    const k = slotKeyFromPickupTime(pickupTime);
+    if (!k) return null;
+    const used = slotUsage[k] || 0;
+    return Math.max(0, CAPACITY_PER_SLOT - used);
+  }, [pickupTime, slotUsage]);
+
+  async function guardSlotCapacityOrAlert(addPots: number) {
+    if (!pickupTime) return true; // 沒選時間就不檢查（你原本規則）
+    if (!serviceDateKey) return true;
+
+    const slotKey = slotKeyFromPickupTime(pickupTime);
+    if (!slotKey) return true;
+
+    // ✅ DB 即時查：該時段目前已用鍋數
+    const usedNow = await fetchUsedPotsForSlot(serviceDateKey, slotKey);
+    const remainNow = Math.max(0, CAPACITY_PER_SLOT - usedNow);
+
+    // 你購物車已經有的鍋數 + 這次要加的鍋數
+    const nextTotal = cartPots + addPots;
+
+    if (nextTotal > remainNow) {
+      alert(`此取餐時段剩餘 ${remainNow} 鍋容量，你的購物車目前已有 ${cartPots} 鍋`);
+      alert(`您選擇的 ${slotKey} 時段已額滿，請改選其他取餐時間。`);
+      return false;
+    }
+
+    return true;
+  }
+
+
+  function fullSlotMsg(pickupTime: string) {
+    const k = slotKeyFromPickupTime(pickupTime) || "--:--";
+    return `您選擇的 ${k} 時段已額滿，請改選其他取餐時間。`;
+  }
 
   const totalAmount = cart.reduce(
     (sum, item) => sum + item.finalPrice * item.quantity,
@@ -476,6 +722,36 @@ export default function POSPage({
   const picked = timeSlots.find((s) => s.value === pickupTime);
   if (!picked) return alert("取餐時間不合法，請重新選擇");
   if (picked.disabled) return alert("此取餐時段已滿，請選其他時段");
+  // ✅ 結帳前最後確認：用 DB 即時查
+  const slotKey = slotKeyFromPickupTime(pickupTime);
+  if (slotKey) {
+    const usedNow = await fetchUsedPotsForSlot(serviceDateKey, slotKey);
+    const remainNow = Math.max(0, CAPACITY_PER_SLOT - usedNow);
+    if (cartPots > remainNow) {
+      
+      alert(`您選擇的 ${slotKey} 時段已額滿，請改選其他取餐時間。`);
+      return;
+    }
+  }
+
+  
+  // 結帳前再確認一次店家是否營業（防止剛好切換狀態）
+  const { data: ss, error: ssErr } = await supabase
+    .from("store_settings")
+    .select("is_open")
+    .eq("id", 1)
+    .single();
+
+  if (ssErr) {
+    alert("無法確認店家狀態，請稍後再試");
+    return;
+  }
+
+  if (!ss?.is_open) {
+    setIsStoreOpen(false); // 立刻同步 UI
+    alert("店家已打烊，暫停接單");
+    return;
+  }
 
 
   setIsLoading(true);
@@ -534,6 +810,51 @@ export default function POSPage({
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-slate-100 font-sans relative overflow-hidden">
+      {/* 公告彈窗（進頁面顯示） */}
+      {showAnnouncement && (
+        <div className="fixed inset-0 z-[50] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white shadow-2xl overflow-hidden border border-slate-100">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="text-lg font-black text-slate-900">公告</div>
+              <button
+                onClick={closeAnnouncement}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500"
+                aria-label="close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 text-slate-800 space-y-4">
+              <ul className="list-disc pl-5 space-y-2 font-bold">
+                <li>一律不附白飯／冬粉／科學麵</li>
+                <li>僅收現金</li>
+                <li>僅限外帶</li>
+                <li>請勿提早到（不好停車）</li>
+              </ul>
+
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                <div className="font-black text-slate-900 mb-2">營業地點</div>
+                <div className="space-y-2 text-sm font-bold text-slate-700 leading-6">
+                  <div>永大夜市｜週一、四 18:00～22:00</div>
+                  <div>善化夜市｜週二、週五 18:00～22:00</div>
+                  <div>安南區工作室｜週三、六 16:30～20:30</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={closeAnnouncement}
+                className="px-5 py-2.5 rounded-2xl bg-slate-900 text-white font-black hover:bg-black transition"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 打烊遮罩 */}
       {!isStoreOpen && (
         <div className="absolute inset-0 z-[60] bg-slate-900/80 backdrop-blur-md flex items-center justify-center flex-col text-white">
@@ -704,12 +1025,34 @@ export default function POSPage({
       {/* --- 左側：菜單區 --- */}
       <div className="w-full md:w-2/3 flex flex-col h-full relative z-10">
         <div className="absolute top-0 left-0 right-0 z-10 bg-slate-100/90 backdrop-blur-md border-b border-slate-200 pt-4 pb-2 px-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <ChefHat className="text-blue-600" />
-            <h1 className="text-xl font-black text-slate-800 tracking-tight">
-              326
-            </h1>
+          <div className="flex items-start gap-3 mb-4">
+            <ChefHat className="text-blue-600 mt-0.5" />
+            <div className="leading-tight">
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <h1 className="text-xl font-black text-slate-800 tracking-tight">326</h1>
+                <div className="text-xs font-bold text-slate-500">
+                  營業時間: 週三、六 16:30-20:30
+                </div>
+              </div>
+
+              <div className="text-xs font-bold text-slate-500 mt-1">
+                地址: 台南市安南區安通路四段119巷30弄2號
+              </div>
+
+              <div className="text-xs font-bold text-slate-500 mt-1">
+                LINE:{" "}
+                <a
+                  href="https://line.me/R/ti/p/@077vslag?from=page&searchId=077vslag"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline"
+                >
+                  @077vslag
+                </a>
+              </div>
+            </div>
           </div>
+
           <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2">
             <button
               onClick={() => setSelectedCategory(0)}
@@ -750,44 +1093,60 @@ export default function POSPage({
                   </h2>
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {itemsInCat.map((item) => (
+                  {itemsInCat.map((item) => {
+                  const soldOutByDailyLimit =
+                    item.name === BEEF_OFFAL_NAME && beefOffalUsed >= DAILY_BEEF_OFFAL_LIMIT;
+
+                  const canClick = item.is_available && !soldOutByDailyLimit && isStoreOpen;
+
+                  return (
                     <div
                       key={item.id}
-                      onClick={() => handleItemClick(item)}
+                      onClick={() => canClick && handleItemClick(item)}
                       className={`group relative bg-white p-4 rounded-3xl border border-slate-100 transition-all duration-200 flex flex-col justify-between min-h-[140px] select-none ${
-                        item.is_available
+                        canClick
                           ? "hover:shadow-xl hover:-translate-y-1 cursor-pointer hover:border-blue-200 active:scale-95"
                           : "opacity-60 cursor-not-allowed bg-slate-50 grayscale"
                       }`}
                     >
-                      {!item.is_available && (
+                      {(!item.is_available || soldOutByDailyLimit) && (
                         <div className="absolute inset-0 z-20 flex items-center justify-center">
                           <span className="bg-slate-800/90 text-white px-4 py-1.5 rounded-full font-bold text-sm shadow-lg transform -rotate-6 backdrop-blur-sm border border-slate-600">
-                            已售完
+                            {soldOutByDailyLimit ? "今日已售完" : "已售完"}
                           </span>
                         </div>
                       )}
+
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg leading-tight mb-1 group-hover:text-blue-700 transition-colors">
                           {item.name}
                         </h3>
+                        {/* 你想的話可以顯示牛雜剩餘 */}
+                        {/* {item.name === BEEF_OFFAL_NAME && (
+                          <div className="text-xs font-bold text-slate-500 mt-1">
+                            今日剩餘：{beefOffalRemaining} / {DAILY_BEEF_OFFAL_LIMIT}
+                          </div>
+                        )} */}
                       </div>
+
                       <div className="flex justify-between items-end mt-4">
                         <span
                           className={`font-black text-xl ${
-                            item.is_available ? "text-slate-900" : "text-slate-400"
+                            canClick ? "text-slate-900" : "text-slate-400"
                           }`}
                         >
                           ${item.price}
                         </span>
-                        {item.is_available && (
+
+                        {canClick && (
                           <div className="bg-blue-50 text-blue-600 w-10 h-10 rounded-full flex items-center justify-center transition-all group-hover:bg-blue-600 group-hover:text-white shadow-sm">
                             <Plus size={20} strokeWidth={3} />
                           </div>
                         )}
                       </div>
                     </div>
-                  ))}
+                  );
+                })}
                 </div>
               </div>
             );

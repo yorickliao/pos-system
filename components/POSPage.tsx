@@ -400,6 +400,8 @@ export default function POSPage({
   const [successText, setSuccessText] = useState("");
   const [beefOffalUsed, setBeefOffalUsed] = useState(0);
   const beefOffalRemaining = Math.max(0, DAILY_BEEF_OFFAL_LIMIT - beefOffalUsed);
+  const [liveMenuItems, setLiveMenuItems] = useState<MenuItem[]>(menuItems);
+  const [liveCategories, setLiveCategories] = useState<Category[]>(categories);
 
 
   // 動態選項狀態
@@ -534,9 +536,10 @@ export default function POSPage({
 
 
   const categoriesDisplay = useMemo(() => {
-    if (selectedCategory === 0) return categories;
-    return categories.filter((c) => c.id === selectedCategory);
-  }, [selectedCategory, categories]);
+    if (selectedCategory === 0) return liveCategories;
+    return liveCategories.filter((c) => c.id === selectedCategory);
+  }, [selectedCategory, liveCategories]);
+
 
   // --- 點擊商品 ---
   const handleItemClick = async (item: MenuItem) => {
@@ -553,7 +556,7 @@ export default function POSPage({
       if (!ok) return;
     }
 
-    const categoryName = categories.find((c) => c.id === item.category_id)?.name || "";
+    const categoryName = liveCategories.find((c) => c.id === item.category_id)?.name || "";
     const isSimpleItem =
       categoryName.includes("主食") ||
       categoryName.includes("單點") ||
@@ -1131,7 +1134,7 @@ export default function POSPage({
 
         <div className="flex-1 overflow-y-auto p-6 pt-44 bg-slate-100 pb-32">
           {categoriesDisplay.map((cat) => {
-            const itemsInCat = menuItems.filter((item) => item.category_id === cat.id);
+            const itemsInCat = liveMenuItems.filter((item) => item.category_id === cat.id);
             if (itemsInCat.length === 0) return null;
             return (
               <div key={cat.id} className="mb-10">

@@ -57,7 +57,7 @@ const FULL_ADDONS_LIST = [
   { name: "臭豆腐", price: 20 },
   { name: "貢丸", price: 20 },
   { name: "魚餃", price: 20 },
-  { name: "蒸餃", price: 20 },
+  { name: "燕餃", price: 20 },
   { name: "黑輪", price: 20 },
   { name: "米血", price: 20 },
   { name: "鴨血", price: 20 },
@@ -66,9 +66,8 @@ const FULL_ADDONS_LIST = [
   { name: "豆皮", price: 30 },
   { name: "豬肉", price: 40 },
   { name: "高麗菜", price: 20 },
-  { name: "科學麵", price: 15 },
-  { name: "冬粉", price: 10 },
-  { name: "白飯", price: 10 },
+  { name: "牛肉", price: 50 },
+  { name: "豬肉換牛肉", price: 10 },
 ];
 
 // --- 2. 定義「牛雜鍋專屬」加料清單 ---
@@ -78,9 +77,11 @@ const BEEF_OFFAL_ADDONS = [
   { name: "鴨血", price: 20 },
   { name: "豆皮", price: 30 },
   { name: "高麗菜", price: 20 },
+  { name: "大腸", price: 50 },
+  { name: "牛腸", price: 50 },
 ];
 
-const ALL_SPICINESS = ["不辣", "微辣", "小辣", "中辣", "大辣"];
+const ALL_SPICINESS = ["不辣", "小辣", "中辣", "大辣"];
 
 // --- 本地 timestamp（不帶時區）工具 ---
 function toLocalTimestampString(d: Date) {
@@ -647,9 +648,13 @@ export default function POSPage({
 
     if (item.name === "牛雜鍋") {
       setCurrentAddonsList(BEEF_OFFAL_ADDONS);
+    } else if (item.name.includes("臭臭鍋")) {
+      // 臭臭鍋：不能出現「豬肉換牛肉」
+      setCurrentAddonsList(FULL_ADDONS_LIST.filter(a => a.name !== "豬肉換牛肉"));
     } else {
       setCurrentAddonsList(FULL_ADDONS_LIST);
     }
+
 
     if (item.name.includes("泡菜")) {
       const spicyOptions = ALL_SPICINESS.filter((opt) => opt !== "不辣");
@@ -1063,7 +1068,7 @@ export default function POSPage({
                     value={modalNote}
                     onChange={(e) => setModalNote(e.target.value)}
                     className="w-full border border-gray-300 rounded-xl p-3 focus:outline-blue-500 text-slate-800"
-                    placeholder="例如：不要蔥..."
+                    
                     rows={2}
                   />
                 </div>

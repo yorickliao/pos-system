@@ -473,7 +473,51 @@ export default function POSPage({
       supabase.removeChannel(channel);
     };
   }, []);
-    
+  
+  useEffect(() => {
+    let mounted = true;
+
+    const refetchMenu = async () => {
+      const { data: catData, error: catErr } = await supabase
+        .from("categories")
+        .select("*")
+        .order("sort_order", { ascending: true });
+
+      const { data: itemData, error: itemErr } = await supabase
+        .from("menu_items")
+        .select("*")
+        .order("category_id")
+        .order("name");
+
+      if (!mounted) return;
+
+      if (!catErr && catData) setLiveCategories(catData as any);
+      if (!itemErr && itemData) setLiveMenuItems(itemData as any);
+    };
+
+    // 進頁面先抓一次，避免拿到舊 props（Vercel 快取情境）
+    refetchMenu();
+
+    const channel = supabase
+      .channel("pos-menu-watch")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "menu_items" },
+        () => refetchMenu()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "categories" },
+        () => refetchMenu()
+      )
+      .subscribe();
+
+    return () => {
+      mounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   useEffect(() => {
   let alive = true;
 

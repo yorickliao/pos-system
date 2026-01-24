@@ -100,6 +100,50 @@ function safeParseDate(s: string) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function formatPickupDateWeekTime(s: string) {
+  const d = safeParseDate(s);
+  if (!d) return "-";
+  const date = d.toLocaleDateString("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const weekday = d.toLocaleDateString("zh-TW", { weekday: "short" }); // 例：週六
+  const time = d.toLocaleTimeString("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${date}（${weekday}）${time}`; // 例：2026/01/24（週六）20:30
+}
+
+function buildCartSummaryLines(cart: CartItem[]) {
+  const lines: string[] = [];
+
+  for (const item of cart) {
+    lines.push(`${item.name} x${item.quantity}  $${item.finalPrice * item.quantity}`);
+
+    // 辣度
+    if (item.options?.spiciness && item.options.spiciness !== "不辣") {
+      lines.push(`  - 辣度：${item.options.spiciness}`);
+    }
+
+    // 加料
+    if (item.options?.addons?.length) {
+      for (const a of item.options.addons) {
+        lines.push(`  - +${a.name} x${a.quantity}`);
+      }
+    }
+
+    // 備註
+    if (item.options?.note) {
+      lines.push(`  - 備註：${item.options.note}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function formatLocalTime(s: string) {
   const d = safeParseDate(s);
   if (!d) return "-";
@@ -785,10 +829,15 @@ export default function POSPage({
     if (itemsError) throw itemsError;
 
     const dailyNum = orderData.pickup_number ? `#${orderData.pickup_number}` : "--";
-    const pickupText = pickupTime ? formatLocalTime(pickupTime) : "-";
+    const pickupText = pickupTime ? formatPickupDateWeekTime(pickupTime) : "-";
 
-    let successMsg = `下單成功\n\n取餐號碼：${dailyNum}\n------------------\n`;
-    successMsg += `姓名：${customerName}\n電話：${customerPhone}\n取餐時間：${pickupText}`;
+    // ✅ 餐點內容（用結帳當下的 cart）
+    const itemsText = buildCartSummaryLines(cart);
+
+    let successMsg = `取餐號碼：${dailyNum}\n------------------\n`;
+    successMsg += `姓名：${customerName}\n電話：${customerPhone}\n取餐時間：${pickupText}\n\n`;
+    successMsg += `餐點內容：\n${itemsText}\n\n`;
+    successMsg += `總金額：$${totalAmount}`;
 
     setSuccessText(successMsg);
     setSuccessOpen(true);
@@ -1112,10 +1161,11 @@ export default function POSPage({
                       {(!item.is_available || soldOutByDailyLimit) && (
                         <div className="absolute inset-0 z-20 flex items-center justify-center">
                           <span className="bg-slate-800/90 text-white px-4 py-1.5 rounded-full font-bold text-sm shadow-lg transform -rotate-6 backdrop-blur-sm border border-slate-600">
-                            {soldOutByDailyLimit ? "今日已售完" : "已售完"}
+                            今日已售完
                           </span>
                         </div>
                       )}
+
 
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg leading-tight mb-1 group-hover:text-blue-700 transition-colors">
@@ -1341,7 +1391,7 @@ export default function POSPage({
                     : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-blue-200"
               }`}
             >
-              {isLoading ? "處理中..." : diningOption === "take_out" ? "確認外帶" : "確認內用"}
+              {isLoading ? "處理中..." : "確認送出"}
             </button>
           </div>
         </div>

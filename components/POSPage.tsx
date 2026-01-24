@@ -648,8 +648,7 @@ export default function POSPage({
 
     if (item.name === "牛雜鍋") {
       setCurrentAddonsList(BEEF_OFFAL_ADDONS);
-    } else if (item.name.includes("臭臭鍋")) {
-      // 臭臭鍋：不能出現「豬肉換牛肉」
+    } else if (item.name.includes("鴨血鍋")) {
       setCurrentAddonsList(FULL_ADDONS_LIST.filter(a => a.name !== "豬肉換牛肉"));
     } else {
       setCurrentAddonsList(FULL_ADDONS_LIST);

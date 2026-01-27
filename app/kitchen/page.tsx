@@ -53,6 +53,9 @@ const CAPACITY_PER_SLOT = 7;
 const SLOT_MINUTES = 15;
 const DAILY_BEEF_OFFAL_LIMIT = 50;
 const BEEF_OFFAL_NAME = "牛雜鍋";
+const UNLIMITED_SLOTS = new Set(["16:30", "20:30"]);
+const isUnlimitedSlot = (hhmm: string) => UNLIMITED_SLOTS.has(hhmm);
+
 
 // 營業時段（依你規則固定 16:30–20:30，每 15 分鐘）
 const SERVICE_START = { hh: 16, mm: 30 };
@@ -552,7 +555,9 @@ function KitchenContent() {
         {slots.map((slot) => {
           const list = grouped.get(slot.key) || [];
           const used = slotUsage.get(slot.key) || 0;
-          const ratio = Math.min(1, used / CAPACITY_PER_SLOT);
+
+          const unlimited = isUnlimitedSlot(slot.label); // slot.label 是 "16:30" 這種
+          const ratio = unlimited ? 0 : Math.min(1, used / CAPACITY_PER_SLOT);
 
           return (
             <div key={slot.key} className="bg-gray-800/40 border border-gray-700 rounded-2xl p-5">
@@ -560,14 +565,17 @@ function KitchenContent() {
               <div className="flex items-start justify-between gap-4">
                 <div className="text-2xl font-black text-white">{slot.label}</div>
                 <div className="text-sm font-bold text-gray-300">
-                  容量 {used}/{CAPACITY_PER_SLOT}
+                  {unlimited ? `容量 ${used}/不限` : `容量 ${used}/${CAPACITY_PER_SLOT}`}
                 </div>
               </div>
 
-              {/* 進度條（沿用暗色 + 黃色重點） */}
-              <div className="mt-3 h-2 rounded-full bg-gray-700 overflow-hidden">
-                <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${ratio * 100}%` }} />
-              </div>
+              {/* 進度條：不限量時段不顯示 */}
+              {!unlimited && (
+                <div className="mt-3 h-2 rounded-full bg-gray-700 overflow-hidden">
+                  <div className="h-full bg-yellow-400 rounded-full" style={{ width: `${ratio * 100}%` }} />
+                </div>
+              )}
+
 
               {/* 訂單列表 */}
               <div className="mt-5">

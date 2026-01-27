@@ -41,45 +41,25 @@ type CartItem = MenuItem & {
   finalPrice: number;
 };
 
+type DbAddon = {
+  addon_item_id: string;
+  name: string;
+  price: number;
+  is_available: boolean;
+  sort_order: number;
+};
+
+
 type TimeSlot = { value: string; label: string; disabled: boolean; used: number; remaining: number; hhmm: string };
 const CAPACITY_PER_SLOT = 7;
 const DAILY_BEEF_OFFAL_LIMIT = 50;
 const BEEF_OFFAL_NAME = "牛雜鍋";
+const UNLIMITED_SLOTS = new Set(["16:30", "20:30"]);
+const isUnlimitedSlot = (hhmm: string) => UNLIMITED_SLOTS.has(hhmm);
+const MIN_POTS_PER_ORDER = 1; // 低消：至少 1 鍋
+const ADDON_CATEGORY_NAME = "加點";
 
 
-// --- 1. 定義「通用」加料清單 ---
-const FULL_ADDONS_LIST = [
-  { name: "蟹肉棒", price: 20 },
-  { name: "鱈魚丸", price: 20 },
-  { name: "北海翅", price: 20 },
-  { name: "鑫鑫腸", price: 20 },
-  { name: "金針菇", price: 10 },
-  { name: "臭豆腐", price: 20 },
-  { name: "貢丸", price: 20 },
-  { name: "魚餃", price: 20 },
-  { name: "燕餃", price: 20 },
-  { name: "黑輪", price: 20 },
-  { name: "米血", price: 20 },
-  { name: "鴨血", price: 20 },
-  { name: "蝦球", price: 20 },
-  { name: "大腸", price: 50 },
-  { name: "豆皮", price: 30 },
-  { name: "豬肉", price: 40 },
-  { name: "高麗菜", price: 20 },
-  { name: "牛肉", price: 50 },
-  { name: "豬肉換牛肉", price: 10 },
-];
-
-// --- 2. 定義「牛雜鍋專屬」加料清單 ---
-const BEEF_OFFAL_ADDONS = [
-  { name: "金針菇", price: 10 },
-  { name: "臭豆腐", price: 20 },
-  { name: "鴨血", price: 20 },
-  { name: "豆皮", price: 30 },
-  { name: "高麗菜", price: 20 },
-  { name: "大腸", price: 50 },
-  { name: "牛腸", price: 50 },
-];
 
 const ALL_SPICINESS = ["不辣", "小辣", "中辣", "大辣"];
 
@@ -238,8 +218,9 @@ function buildPickupSlotsForServiceDate(
     const k = hhmmKey(d); // "16:30"
 
     const used = usage[k] || 0;
-    const remaining = Math.max(0, CAPACITY_PER_SLOT - used);
-    const full = remaining <= 0;
+    const unlimited = isUnlimitedSlot(k);
+    const remaining = unlimited ? 9999 : Math.max(0, CAPACITY_PER_SLOT - used);
+    const full = !unlimited && remaining <= 0;
 
     // ✅ 只有 serviceDate 是「今天」才禁選早於現在的時段（週三/週六當天）
     const past = isSameDay && d.getTime() < now.getTime();
@@ -409,8 +390,8 @@ export default function POSPage({
   const [currentSpicinessOptions, setCurrentSpicinessOptions] = useState<
     string[]
   >([]);
-  const [currentAddonsList, setCurrentAddonsList] =
-    useState(FULL_ADDONS_LIST);
+  const [currentAddonsList, setCurrentAddonsList] = useState<DbAddon[]>([]);
+
 
   // 公告彈窗
   const ANNOUNCE_KEY = "pos_announcement_v1"; // 內容改了就換 v2
@@ -581,9 +562,13 @@ export default function POSPage({
 
 
   const categoriesDisplay = useMemo(() => {
-    if (selectedCategory === 0) return liveCategories;
-    return liveCategories.filter((c) => c.id === selectedCategory);
+    const visibleCats = liveCategories.filter((c) => c.name !== ADDON_CATEGORY_NAME);
+
+    if (selectedCategory === 0) return visibleCats;
+
+    return visibleCats.filter((c) => c.id === selectedCategory);
   }, [selectedCategory, liveCategories]);
+
 
 
   // --- 點擊商品 ---
@@ -640,19 +625,20 @@ export default function POSPage({
   };
 
 
-  const openModal = (item: MenuItem) => {
+  const openModal = async (item: MenuItem) => {
     setSelectedItem(item);
     setModalQuantity(1);
     setModalNote("");
     setModalAddons({});
 
-    if (item.name === "牛雜鍋") {
-      setCurrentAddonsList(BEEF_OFFAL_ADDONS);
-    } else if (item.name.includes("鴨血鍋")) {
-      setCurrentAddonsList(FULL_ADDONS_LIST.filter(a => a.name !== "豬肉換牛肉"));
-    } else {
-      setCurrentAddonsList(FULL_ADDONS_LIST);
+    try {
+      const addons = await fetchAddonsForBaseItem(item.id);
+      setCurrentAddonsList(addons);
+    } catch (e) {
+      console.error(e);
+      setCurrentAddonsList([]);
     }
+
 
 
     if (item.name.includes("泡菜")) {
@@ -686,11 +672,24 @@ export default function POSPage({
         return;
       }
 
+    for (const [addonId, qty] of Object.entries(modalAddons)) {
+      if (qty <= 0) continue;
+      const row = currentAddonsList.find((a) => a.addon_item_id === addonId);
+      if (!row) {
+        alert("加點資料已變更，請重新選擇加點");
+        return;
+      }
+      if (!row.is_available) {
+        alert(`加點「${row.name}」已售完，請移除後再送出`);
+        return;
+      }
+    }
+
     const addonsList = Object.entries(modalAddons)
       .filter(([_, qty]) => qty > 0)
-      .map(([name, qty]) => {
-        const addon = currentAddonsList.find((a) => a.name === name);
-        return { name, price: addon?.price || 0, quantity: qty };
+      .map(([addonId, qty]) => {
+        const addon = currentAddonsList.find((a) => a.addon_item_id === addonId)!;
+        return { name: addon.name, price: addon.price, quantity: qty };
       });
 
     const addonsTotal = addonsList.reduce((sum, a) => sum + a.price * a.quantity, 0);
@@ -762,9 +761,13 @@ export default function POSPage({
     if (!pickupTime) return null;
     const k = slotKeyFromPickupTime(pickupTime);
     if (!k) return null;
+
+    if (isUnlimitedSlot(k)) return Number.POSITIVE_INFINITY;
+
     const used = slotUsage[k] || 0;
     return Math.max(0, CAPACITY_PER_SLOT - used);
   }, [pickupTime, slotUsage]);
+
 
   async function guardSlotCapacityOrAlert(addPots: number) {
     if (!pickupTime) return true; // 沒選時間就不檢查（你原本規則）
@@ -772,6 +775,9 @@ export default function POSPage({
 
     const slotKey = slotKeyFromPickupTime(pickupTime);
     if (!slotKey) return true;
+
+    // ✅ 16:30、20:30 不受 7 鍋上限
+    if (isUnlimitedSlot(slotKey)) return true;
 
     // ✅ DB 即時查：該時段目前已用鍋數
     const usedNow = await fetchUsedPotsForSlot(serviceDateKey, slotKey);
@@ -795,6 +801,28 @@ export default function POSPage({
     return `您選擇的 ${k} 時段已額滿，請改選其他取餐時間。`;
   }
 
+  async function fetchAddonsForBaseItem(baseItemId: string) {
+    const { data, error } = await supabase
+      .from("v_item_addons")
+      .select("addon_item_id,name,price,is_available,sort_order,is_enabled")
+      .eq("base_item_id", baseItemId)
+      .eq("is_enabled", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (error) throw error;
+
+    // 注意：這裡不把售完過濾掉，而是回前端顯示「已售完」且禁用
+    return ((data as any[]) || []).map((r) => ({
+      addon_item_id: r.addon_item_id,
+      name: r.name,
+      price: Number(r.price || 0),
+      is_available: !!r.is_available,
+      sort_order: Number(r.sort_order || 0),
+    })) as DbAddon[];
+  }
+
+
   const totalAmount = cart.reduce(
     (sum, item) => sum + item.finalPrice * item.quantity,
     0
@@ -805,6 +833,7 @@ export default function POSPage({
   if (!bookingOpen) return alert("目前未開放預訂");
   if (!isStoreOpen) return alert("目前暫停接單");
   if (cart.length === 0) return;
+  if (cartPots < MIN_POTS_PER_ORDER) return alert("低消一個火鍋");
 
   if (!customerName) return alert("外帶請輸入姓名");
   if (!customerPhone) return alert("請輸入電話");
@@ -819,15 +848,15 @@ export default function POSPage({
   if (picked.disabled) return alert("此取餐時段已滿，請選其他時段");
   // ✅ 結帳前最後確認：用 DB 即時查
   const slotKey = slotKeyFromPickupTime(pickupTime);
-  if (slotKey) {
+  if (slotKey && !isUnlimitedSlot(slotKey)) {
     const usedNow = await fetchUsedPotsForSlot(serviceDateKey, slotKey);
     const remainNow = Math.max(0, CAPACITY_PER_SLOT - usedNow);
     if (cartPots > remainNow) {
-      
       alert(`您選擇的 ${slotKey} 時段已額滿，請改選其他取餐時間。`);
       return;
     }
   }
+
 
   
   // 結帳前再確認一次店家是否營業（防止剛好切換狀態）
@@ -1010,46 +1039,53 @@ export default function POSPage({
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {currentAddonsList.map((addon) => {
-                    const qty = modalAddons[addon.name] || 0;
+                    const key = addon.addon_item_id;
+                    const qty = modalAddons[key] || 0;
+                    const soldOut = !addon.is_available;
+
                     return (
                       <div
-                        key={addon.name}
+                        key={key}
                         className={`flex justify-between items-center p-3 rounded-xl border transition-all ${
-                          qty > 0
-                            ? "border-blue-500 bg-blue-50"
-                            : "border-gray-100 bg-white"
+                          soldOut
+                            ? "border-gray-200 bg-gray-50 opacity-60"
+                            : qty > 0
+                              ? "border-blue-500 bg-blue-50"
+                              : "border-gray-100 bg-white"
                         }`}
                       >
                         <div>
-                          <div className="font-bold text-slate-800">
-                            {addon.name}
+                          <div className="font-bold text-slate-800 flex items-center gap-2">
+                            <span>{addon.name}</span>
+                            {soldOut && <span className="text-xs font-black text-red-500">已售完</span>}
                           </div>
                           <div className="text-sm text-slate-500">
                             ${addon.price}
                           </div>
                         </div>
+
                         <div className="flex items-center gap-3">
                           <button
-                            onClick={() => updateAddonQty(addon.name, -1)}
+                            onClick={() => updateAddonQty(key, -1)}
                             className={`w-8 h-8 rounded-full flex items-center justify-center transition ${
-                              qty > 0
-                                ? "bg-white text-blue-600 shadow"
-                                : "bg-gray-100 text-gray-400"
+                              qty > 0 ? "bg-white text-blue-600 shadow" : "bg-gray-100 text-gray-400"
                             }`}
                             disabled={qty === 0}
                           >
                             <Minus size={16} />
                           </button>
-                          <span
-                            className={`w-6 text-center font-bold ${
-                              qty > 0 ? "text-blue-700" : "text-gray-300"
-                            }`}
-                          >
+
+                          <span className={`w-6 text-center font-bold ${qty > 0 ? "text-blue-700" : "text-gray-300"}`}>
                             {qty}
                           </span>
+
                           <button
-                            onClick={() => updateAddonQty(addon.name, 1)}
-                            className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center shadow hover:bg-blue-700"
+                            onClick={() => updateAddonQty(key, 1)}
+                            className={`w-8 h-8 rounded-full flex items-center justify-center shadow transition ${
+                              soldOut ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700"
+                            }`}
+                            disabled={soldOut}
+                            title={soldOut ? "已售完，無法加點" : "加入加點"}
                           >
                             <Plus size={16} />
                           </button>
@@ -1057,6 +1093,7 @@ export default function POSPage({
                       </div>
                     );
                   })}
+
                 </div>
               </div>
 
@@ -1164,25 +1201,31 @@ export default function POSPage({
             >
               全部餐點
             </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
-                className={`px-5 py-2.5 rounded-2xl font-bold text-sm whitespace-nowrap transition ${
-                  selectedCategory === cat.id
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {cat.name}
-              </button>
-            ))}
+            {liveCategories
+              .filter((cat) => cat.name !== ADDON_CATEGORY_NAME)
+              .map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`px-5 py-2.5 rounded-2xl font-bold text-sm whitespace-nowrap transition ${
+                    selectedCategory === cat.id
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {cat.name}
+                </button>
+              ))}
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 pt-44 bg-slate-100 pb-32">
           {categoriesDisplay.map((cat) => {
-            const itemsInCat = liveMenuItems.filter((item) => item.category_id === cat.id);
+            const itemsInCat = liveMenuItems
+              .filter((item) => item.category_id === cat.id)
+              // 保險：就算哪天 categoriesDisplay 沒過濾到，這裡也不會渲染加點
+              .filter(() => cat.name !== ADDON_CATEGORY_NAME);
+
             if (itemsInCat.length === 0) return null;
             return (
               <div key={cat.id} className="mb-10">
@@ -1433,9 +1476,9 @@ export default function POSPage({
             </div>
             <button
               onClick={handleCheckout}
-              disabled={cart.length === 0 || isLoading || !isStoreOpen}
+              disabled={cart.length === 0 || isLoading || !isStoreOpen || cartPots < MIN_POTS_PER_ORDER}
               className={`w-full py-4 rounded-2xl text-xl font-bold shadow-xl shadow-blue-200 transition-all transform active:scale-[0.98] flex items-center justify-center gap-3 ${
-                cart.length === 0 || isLoading || !isStoreOpen
+                cart.length === 0 || isLoading || !isStoreOpen || cartPots < MIN_POTS_PER_ORDER
                   ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
                   : diningOption === "take_out"
                     ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:shadow-green-200"

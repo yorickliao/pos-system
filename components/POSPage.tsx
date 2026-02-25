@@ -960,6 +960,7 @@ export default function POSPage({
                 <li>僅收現金</li>
                 <li>僅限外帶</li>
                 <li>請勿提早到（不好停車）</li>
+                <li>3/1起，部分項目調漲，詳情請至326臉書</li>
               </ul>
 
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">

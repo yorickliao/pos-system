@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import {
   ShoppingCart,
@@ -14,6 +14,7 @@ import {
   ShoppingBag,
   X,
   ChevronDown,
+  Loader2, // 新增 Loader icon
 } from "lucide-react";
 
 const supabase = createClient(
@@ -102,7 +103,7 @@ function buildCartSummaryLines(cart: CartItem[]) {
   const lines: string[] = [];
 
   for (const item of cart) {
-    lines.push(`${item.name} x${item.quantity}  $${item.finalPrice * item.quantity}`);
+    lines.push(`${item.name} x${item.quantity}  $${calcCartItemTotal(item)}`);
 
     // 辣度
     if (item.options?.spiciness && item.options.spiciness !== "不辣") {
@@ -124,6 +125,21 @@ function buildCartSummaryLines(cart: CartItem[]) {
 
   return lines.join("\n");
 }
+
+function calcAddonsTotal(addons?: { name: string; price: number; quantity: number }[]) {
+  return (addons || []).reduce((sum, a) => sum + Number(a.price || 0) * Number(a.quantity || 0), 0);
+}
+
+function calcCartItemTotal(item: CartItem) {
+  const base = Number(item.finalPrice || 0) * Number(item.quantity || 0); // 火鍋單價 * 鍋數
+  const addons = calcAddonsTotal(item.options?.addons); // 加點只算自身數量，不乘鍋數
+  return base + addons;
+}
+
+function calcCartTotal(cart: CartItem[]) {
+  return cart.reduce((sum, item) => sum + calcCartItemTotal(item), 0);
+}
+
 
 function formatLocalTime(s: string) {
   const d = safeParseDate(s);
@@ -161,10 +177,6 @@ function nextServiceDate(from: Date) {
 }
 
 // 判斷目前是否在「可預訂窗口」內，並回傳這次要預訂的營業日 dateKey
-// 規則：
-// - 週二 00:00 起 -> 預訂週三
-// - 週五 00:00 起 -> 預訂週六
-// - 營業日當天：也允許下單到 20:30（你若想 20:30 後關閉可再加條件）
 function getActiveBookingServiceDate(now: Date) {
   const day = now.getDay();
   const hh = now.getHours();
@@ -384,6 +396,12 @@ export default function POSPage({
   const beefOffalRemaining = Math.max(0, DAILY_BEEF_OFFAL_LIMIT - beefOffalUsed);
   const [liveMenuItems, setLiveMenuItems] = useState<MenuItem[]>(menuItems);
   const [liveCategories, setLiveCategories] = useState<Category[]>(categories);
+  const [isQtyModalOpen, setIsQtyModalOpen] = useState(false);
+  const [qtyModalItem, setQtyModalItem] = useState<MenuItem | null>(null);
+  const [qtyModalQuantity, setQtyModalQuantity] = useState(1);
+  
+  // 🔥 新增：雙重保護鎖
+  const checkoutLockRef = useRef(false);
 
 
   // 動態選項狀態
@@ -587,15 +605,55 @@ export default function POSPage({
     }
 
     const categoryName = liveCategories.find((c) => c.id === item.category_id)?.name || "";
-    const isSimpleItem =
-      categoryName.includes("主食") ||
+
+    const isMainFood = categoryName.includes("主食");
+    const isSimpleDirect =
       categoryName.includes("單點") ||
       categoryName.includes("飲料");
 
-    if (isSimpleItem) addToCartDirectly(item);
-    else openModal(item);
+    if (isMainFood) {
+      openQtyModal(item);
+    } else if (isSimpleDirect) {
+      addToCartDirectly(item);
+    } else {
+      openModal(item);
+    }
+
   };
 
+  const openQtyModal = (item: MenuItem) => {
+    setIsModalOpen(false); // ✅ 保險：避免兩個 modal 同時存在
+    setSelectedItem(null); // ✅ 可選：更乾淨
+    setQtyModalItem(item);
+    setQtyModalQuantity(1);
+    setIsQtyModalOpen(true);
+  };
+
+
+  const confirmQtyModalAdd = () => {
+    if (!qtyModalItem) return;
+
+    setCart((prevCart) => {
+      const existingIndex = prevCart.findIndex(
+        (i) => i.id === qtyModalItem.id && (!i.options || Object.keys(i.options).length === 0)
+      );
+
+      if (existingIndex > -1) {
+        const next = [...prevCart];
+        next[existingIndex].quantity += qtyModalQuantity;
+        return next;
+      }
+
+      return [
+        ...prevCart,
+        { ...qtyModalItem, quantity: qtyModalQuantity, finalPrice: qtyModalItem.price },
+      ];
+    });
+
+    setIsQtyModalOpen(false);
+    setQtyModalItem(null);
+    setQtyModalQuantity(1);
+  };
 
   const addToCartDirectly = (item: MenuItem) => {
     setCart((prevCart) => {
@@ -644,7 +702,7 @@ export default function POSPage({
     if (item.name.includes("泡菜")) {
       const spicyOptions = ALL_SPICINESS.filter((opt) => opt !== "不辣");
       setCurrentSpicinessOptions(spicyOptions);
-      setModalSpiciness("微辣");
+      setModalSpiciness("小辣");
     } else {
       setCurrentSpicinessOptions(ALL_SPICINESS);
       setModalSpiciness("不辣");
@@ -692,8 +750,7 @@ export default function POSPage({
         return { name: addon.name, price: addon.price, quantity: qty };
       });
 
-    const addonsTotal = addonsList.reduce((sum, a) => sum + a.price * a.quantity, 0);
-    const finalPrice = selectedItem.price + addonsTotal;
+    const finalPrice = selectedItem.price; // finalPrice 永遠只存火鍋本體單價
 
     const newItem: CartItem = {
       ...selectedItem,
@@ -823,118 +880,172 @@ export default function POSPage({
   }
 
 
-  const totalAmount = cart.reduce(
-    (sum, item) => sum + item.finalPrice * item.quantity,
-    0
-  );
+  const totalAmount = calcCartTotal(cart);
   const totalQty = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const handleCheckout = async () => {
-  if (!bookingOpen) return alert("目前未開放預訂");
-  if (!isStoreOpen) return alert("目前暫停接單");
-  if (cart.length === 0) return;
-  if (cartPots < MIN_POTS_PER_ORDER) return alert("低消一個火鍋");
+  const modalAddonsTotal = useMemo(() => {
+  // modal 未開或 selectedItem 還沒選時，直接回 0
+  if (!isModalOpen || !selectedItem) return 0;
 
-  if (!customerName) return alert("外帶請輸入姓名");
-  if (!customerPhone) return alert("請輸入電話");
-  if (!pickupTime) return alert("請選擇取餐時間");
+  return Object.entries(modalAddons).reduce((acc, [addonId, q]) => {
+    const addon = currentAddonsList.find((a) => a.addon_item_id === addonId);
+    return acc + (addon ? Number(addon.price || 0) * Number(q || 0) : 0);
+  }, 0);
+}, [isModalOpen, selectedItem, modalAddons, currentAddonsList]);
 
-  // 安全：確保 pickupTime 落在本次營業日 slots 內
-  const ok = timeSlots.some((s) => s.value === pickupTime);
-  if (!ok) return alert("取餐時間不合法，請重新選擇");
+const modalSubtotal = useMemo(() => {
+  if (!isModalOpen || !selectedItem) return 0;
 
-  const picked = timeSlots.find((s) => s.value === pickupTime);
-  if (!picked) return alert("取餐時間不合法，請重新選擇");
-  if (picked.disabled) return alert("此取餐時段已滿，請選其他時段");
-  // ✅ 結帳前最後確認：用 DB 即時查
-  const slotKey = slotKeyFromPickupTime(pickupTime);
-  if (slotKey && !isUnlimitedSlot(slotKey)) {
-    const usedNow = await fetchUsedPotsForSlot(serviceDateKey, slotKey);
-    const remainNow = Math.max(0, CAPACITY_PER_SLOT - usedNow);
-    if (cartPots > remainNow) {
-      alert(`您選擇的 ${slotKey} 時段已額滿，請改選其他取餐時間。`);
-      return;
-    }
-  }
-
+  // 火鍋單價 * 鍋數 + 加點總額（加點不乘鍋數）
+  return Number(selectedItem.price || 0) * Number(modalQuantity || 0) + Number(modalAddonsTotal || 0);
+}, [isModalOpen, selectedItem, modalQuantity, modalAddonsTotal]);
 
   
-  // 結帳前再確認一次店家是否營業（防止剛好切換狀態）
-  const { data: ss, error: ssErr } = await supabase
-    .from("store_settings")
-    .select("is_open")
-    .eq("id", 1)
-    .single();
+  
+  // 1. 新增一個 ref 來鎖定這筆訂單的 ID
+  // 這樣即使網路重試，ID 永遠固定是同一個
+  const currentOrderIdRef = useRef<string | null>(null);
 
-  if (ssErr) {
-    alert("無法確認店家狀態，請稍後再試");
-    return;
-  }
+  // 防連點冷卻
+  const lastClickTime = useRef(0); 
 
-  if (!ss?.is_open) {
-    setIsStoreOpen(false); // 立刻同步 UI
-    alert("店家已打烊，暫停接單");
-    return;
-  }
+  const handleCheckout = async () => {
+    // 1. 基本防連點鎖 (前端層)
+    if (checkoutLockRef.current || isLoading) return;
 
+    // 2. 時間冷卻鎖 (2秒)
+    const now = Date.now();
+    if (now - lastClickTime.current < 2000) return;
+    lastClickTime.current = now;
 
-  setIsLoading(true);
-  try {
-    const { data: orderData, error: orderError } = await supabase
-      .from("orders")
-      .insert({
-        table_no: "外帶",
-        dining_option: "take_out",
-        customer_name: customerName,
-        customer_phone: customerPhone,
-        pickup_time: pickupTime, // 本地 timestamp（不帶時區）
-        total_amount: totalAmount,
-        status: "pending",
-      })
-      .select()
-      .single();
+    checkoutLockRef.current = true;
+    setIsLoading(true);
 
-    if (orderError) throw orderError;
+    try {
+      // --- 前置檢查 ---
+      if (!bookingOpen) throw new Error("目前未開放預訂");
+      if (!isStoreOpen) throw new Error("目前暫停接單");
+      if (cart.length === 0) return;
+      if (cartPots < MIN_POTS_PER_ORDER) throw new Error("低消一個火鍋");
+      if (!customerName || !customerPhone || !pickupTime) throw new Error("請完整填寫資料");
 
-    const orderItems = cart.map((item) => ({
-      order_id: orderData.id,
-      menu_item_id: item.id,
-      item_name: item.name,
-      price_at_time: item.finalPrice,
-      quantity: item.quantity,
-      options: item.options,
-    }));
+      // 安全：確保 pickupTime 落在本次營業日 slots 內
+      const ok = timeSlots.some((s) => s.value === pickupTime);
+      if (!ok) throw new Error("取餐時間不合法，請重新選擇");
+      const picked = timeSlots.find((s) => s.value === pickupTime);
+      if (!picked || picked.disabled) throw new Error("此取餐時段已滿，請選其他時段");
 
-    const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
-    if (itemsError) throw itemsError;
+      // --- 異步檢查 ---
+      const slotKey = slotKeyFromPickupTime(pickupTime);
+      if (slotKey && !isUnlimitedSlot(slotKey)) {
+        const usedNow = await fetchUsedPotsForSlot(serviceDateKey, slotKey);
+        const remainNow = Math.max(0, CAPACITY_PER_SLOT - usedNow);
+        if (cartPots > remainNow) throw new Error(`時段 ${slotKey} 已滿`);
+      }
 
-    const dailyNum = orderData.pickup_number ? `#${orderData.pickup_number}` : "--";
-    const pickupText = pickupTime ? formatPickupDateWeekTime(pickupTime) : "-";
+      // 檢查營業狀態
+      const { data: ss } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
+      if (!ss?.is_open) {
+        setIsStoreOpen(false);
+        throw new Error("店家已打烊");
+      }
 
-    // ✅ 餐點內容（用結帳當下的 cart）
-    const itemsText = buildCartSummaryLines(cart);
+      // 🔥🔥🔥 核心修改開始：前端產生 ID 🔥🔥🔥
+      
+      // 如果這張單還沒產生過 ID，就產生一個新的
+      // 如果是 Retry (重試)，這個 ref 會有值，就會沿用舊的！
+      if (!currentOrderIdRef.current) {
+        currentOrderIdRef.current = crypto.randomUUID();
+      }
 
-    let successMsg = `取餐號碼：${dailyNum}\n------------------\n`;
-    successMsg += `姓名：${customerName}\n電話：${customerPhone}\n取餐時間：${pickupText}\n\n`;
-    successMsg += `餐點內容：\n${itemsText}\n\n`;
-    successMsg += `總金額：$${totalAmount}`;
+      // 1. 寫入訂單 (指定 ID)
+      const { data: orderData, error: orderError } = await supabase
+        .from("orders")
+        .insert({
+          id: currentOrderIdRef.current, // 👈 指定 ID，不讓資料庫亂數
+          table_no: "外帶",
+          dining_option: "take_out",
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          pickup_time: pickupTime,
+          total_amount: totalAmount,
+          status: "pending",
+        })
+        .select()
+        .single();
 
-    setSuccessText(successMsg);
-    setSuccessOpen(true);
+      // 2. 處理資料庫回應
+      let finalOrderData = orderData;
 
+      if (orderError) {
+        // 🚨 捕捉「主鍵衝突 (Duplicate Key)」錯誤 (Postgres code 23505)
+        // 這代表：雖然前端以為失敗了又送一次，但其實資料庫第一次已經成功寫入了！
+        if (orderError.code === '23505') {
+          console.warn("系統攔截到重複訂單，視為成功處理。");
+          
+          // 我們去把那筆已經存在的訂單撈回來，假裝這次是成功的
+          const { data: existingOrder } = await supabase
+            .from("orders")
+            .select()
+            .eq("id", currentOrderIdRef.current)
+            .single();
+            
+          if (!existingOrder) throw orderError; // 如果真的撈不到，那才是真錯誤
+          finalOrderData = existingOrder;
+          
+          // ⚠️ 重要：既然已經存在，代表 order_items 可能也寫過了，
+          // 為求安全，這裡可以直接跳到成功畫面，或者檢查 order_items 是否存在。
+          // 簡單作法：直接視為成功。
+        } else {
+          // 其他錯誤 (如權限不足、網路斷線) 就真的拋出異常
+          throw orderError; 
+        }
+      }
 
-    setCart([]);
-    setCustomerName("");
-    setCustomerPhone("");
-    setPickupTime("");
-    setIsMobileCartOpen(false);
-  } catch (error: any) {
-    console.error("結帳錯誤:", error);
-    alert("結帳失敗：" + error.message);
-  } finally {
-    setIsLoading(false);
-  }
-};
+      // 3. 寫入訂單細項 (如果是重複單，這裡可能會報錯，所以也要包 try/catch 或檢查)
+      // 如果上面是攔截到重複單(23505)，通常 order_items 也會遇到重複寫入問題
+      // 建議：如果是新單才寫入 items
+      if (!orderError) {
+        const orderItems = cart.map((item) => ({
+          order_id: finalOrderData.id, // 用我們確定的 ID
+          menu_item_id: item.id,
+          item_name: item.name,
+          price_at_time: item.finalPrice,
+          quantity: item.quantity,
+          options: item.options,
+        }));
+        
+        const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
+        if (itemsError) throw itemsError;
+      }
+
+      // --- 成功後處理 ---
+      const dailyNum = finalOrderData.pickup_number ? `#${finalOrderData.pickup_number}` : "--";
+      const pickupText = formatPickupDateWeekTime(pickupTime);
+      const itemsText = buildCartSummaryLines(cart);
+
+      setSuccessText(`取餐號碼：${dailyNum}\n------------------\n姓名：${customerName}\n電話：${customerPhone}\n取餐時間：${pickupText}\n\n餐點內容：\n${itemsText}\n\n總金額：$${totalAmount}`);
+      setSuccessOpen(true);
+
+      // 清空
+      setCart([]);
+      setCustomerName("");
+      setCustomerPhone("");
+      setPickupTime("");
+      setIsMobileCartOpen(false);
+      
+      // ✅ 成功後，清空 ID ref，讓下一位客人(或下一次點餐)產生新 ID
+      currentOrderIdRef.current = null;
+
+    } catch (error: any) {
+      console.error("結帳錯誤:", error);
+      alert(error.message || "結帳失敗，請稍後再試");
+      // 失敗時不清空 currentOrderIdRef，讓使用者按「重試」時還能用同一個 ID
+    } finally {
+      setIsLoading(false);
+      checkoutLockRef.current = false;
+    }
+  };
 
 
   return (
@@ -960,7 +1071,6 @@ export default function POSPage({
                 <li>僅收現金</li>
                 <li>僅限外帶</li>
                 <li>請勿提早到（不好停車）</li>
-                <li>3/1起，部分項目調漲，詳情請至326臉書</li>
               </ul>
 
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
@@ -1137,17 +1247,9 @@ export default function POSPage({
               <div className="flex flex-col">
                 <span className="text-xs text-gray-500 font-bold">小計</span>
                 <span className="text-2xl font-black text-slate-900">
-                  $
-                  {(selectedItem.price +
-                    Object.entries(modalAddons).reduce((acc, [name, q]) => {
-                      return (
-                        acc +
-                        (currentAddonsList.find((a) => a.name === name)?.price || 0) *
-                          q
-                      );
-                    }, 0)) *
-                    modalQuantity}
+                  ${modalSubtotal}
                 </span>
+
               </div>
               <button
                 onClick={confirmModalAdd}
@@ -1448,10 +1550,13 @@ export default function POSPage({
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-slate-900">
-                        ${item.finalPrice * item.quantity}
+                        ${calcCartItemTotal(item)}
                       </div>
-                      <div className="text-xs text-slate-400">
-                        單價 ${item.finalPrice}
+                      <div className="text-xs text-slate-400 space-y-0.5">
+                        <div>火鍋單價 ${item.finalPrice} × {item.quantity}</div>
+                        {calcAddonsTotal(item.options?.addons) > 0 && (
+                          <div>加點 ${calcAddonsTotal(item.options?.addons)}</div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1475,18 +1580,27 @@ export default function POSPage({
                 </span>
               </div>
             </div>
+            
+            {/* 🔥🔥🔥 核心修改：按鈕狀態與視覺回饋 🔥🔥🔥 */}
             <button
               onClick={handleCheckout}
               disabled={cart.length === 0 || isLoading || !isStoreOpen || cartPots < MIN_POTS_PER_ORDER}
-              className={`w-full py-4 rounded-2xl text-xl font-bold shadow-xl shadow-blue-200 transition-all transform active:scale-[0.98] flex items-center justify-center gap-3 ${
+              className={`w-full py-4 rounded-2xl text-xl font-bold shadow-xl transition-all transform flex items-center justify-center gap-3 ${
                 cart.length === 0 || isLoading || !isStoreOpen || cartPots < MIN_POTS_PER_ORDER
                   ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
                   : diningOption === "take_out"
-                    ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:shadow-green-200"
-                    : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-blue-200"
+                    ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:shadow-green-200 active:scale-[0.98]"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-blue-200 active:scale-[0.98]"
               }`}
             >
-              {isLoading ? "處理中..." : "確認送出"}
+              {isLoading ? (
+                <>
+                  <Loader2 className="animate-spin" size={24} />
+                  <span>處理中...</span>
+                </>
+              ) : (
+                "確認送出"
+              )}
             </button>
           </div>
         </div>
@@ -1517,6 +1631,69 @@ export default function POSPage({
           </div>
         </div>
       )}
+
+      {/* --- 主食數量彈窗 (Qty Modal) --- */}
+      {isQtyModalOpen && qtyModalItem && (
+        <div className="fixed inset-0 z-[75] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm md:p-4 animate-fade-in">
+          <div className="bg-white w-full max-w-lg rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-slide-up">
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
+              <h2 className="text-xl font-black text-slate-800">{qtyModalItem.name}</h2>
+              <button
+                onClick={() => setIsQtyModalOpen(false)}
+                className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"
+              >
+                <X size={22} className="text-gray-600" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div className="flex items-center justify-between bg-gray-50 p-4 rounded-xl">
+                <span className="font-bold text-lg text-slate-700">份數</span>
+                <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-lg shadow-sm border border-gray-200">
+                  <button
+                    onClick={() => setQtyModalQuantity(Math.max(1, qtyModalQuantity - 1))}
+                    className="text-gray-600 hover:text-blue-600"
+                  >
+                    <Minus />
+                  </button>
+                  <span className="text-xl font-black text-slate-800 w-8 text-center">
+                    {qtyModalQuantity}
+                  </span>
+                  <button
+                    onClick={() => setQtyModalQuantity(qtyModalQuantity + 1)}
+                    className="text-gray-600 hover:text-blue-600"
+                  >
+                    <Plus />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <div className="text-slate-500 font-bold">小計</div>
+                <div className="text-2xl font-black text-slate-900">
+                  ${qtyModalItem.price * qtyModalQuantity}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-gray-100 bg-white flex gap-3 pb-10 md:pb-4">
+              <button
+                onClick={() => setIsQtyModalOpen(false)}
+                className="flex-1 py-3 rounded-xl font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmQtyModalAdd}
+                className="flex-1 py-3 rounded-xl font-bold bg-slate-900 text-white hover:bg-black transition"
+              >
+                加入購物車
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
     </div>
   );

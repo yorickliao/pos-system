@@ -1616,7 +1616,7 @@ const modalSubtotal = useMemo(() => {
             <div className="bg-gradient-to-b from-green-500 to-green-600 px-6 py-8 flex flex-col items-center justify-center text-white text-center">
               <div className="bg-white text-green-500 rounded-full p-4 mb-4 shadow-lg transform scale-110">
                 {/* 需確保頂部有 import { Check } from "lucide-react"; */}
-                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinelinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+               <Check size={36} strokeWidth={3} />
               </div>
               <h2 className="text-3xl font-black mb-1 tracking-wide">下單成功！</h2>
               <p className="text-green-100 font-bold text-sm">請於指定時間前往取餐，並截圖保留此畫面</p>

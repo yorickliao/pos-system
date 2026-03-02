@@ -55,6 +55,7 @@ const DAILY_BEEF_OFFAL_LIMIT = 50;
 const BEEF_OFFAL_NAME = "牛雜鍋";
 const UNLIMITED_SLOTS = new Set(["16:30", "20:30"]);
 const isUnlimitedSlot = (hhmm: string) => UNLIMITED_SLOTS.has(hhmm);
+const SIDE_DISHES = new Set(["白飯", "冬粉", "科學麵"]);
 
 
 // 營業時段（依你規則固定 16:30–20:30，每 15 分鐘）
@@ -629,59 +630,92 @@ function KitchenContent() {
 
                           {/* 訂單明細 */}
                           <div className="p-4 flex-1 bg-white">
-                            <ul className="space-y-3">
-                              {order.order_items.map((item) => {
-                                const opt = parseOptions(item.options);
+                            <ul className="space-y-1"> {/* 修改：間距稍微縮小，讓排版緊湊一點 */}
+                              {[...order.order_items]
+                                .sort((a, b) => {
+                                  // 排序邏輯：主食在前，副食(白飯等)在後
+                                  const aIsSide = SIDE_DISHES.has(a.item_name);
+                                  const bIsSide = SIDE_DISHES.has(b.item_name);
+                                  if (aIsSide && !bIsSide) return 1;
+                                  if (!aIsSide && bIsSide) return -1;
+                                  return 0;
+                                })
+                                .map((item) => {
+                                  const opt = parseOptions(item.options);
+                                  const isSideDish = SIDE_DISHES.has(item.item_name); // 判斷是否為副食
 
-                                return (
-                                  <li
-                                    key={item.id}
-                                    className="flex justify-between items-start border-b border-dashed border-gray-200 pb-3 last:border-0"
-                                  >
-                                    <div className="flex-1 pr-3">
-                                      <div className="font-bold text-lg leading-tight text-gray-800">
-                                        {item.item_name}
-                                        {opt?.spiciness && opt.spiciness !== "不辣" ? (
-                                          <span className="ml-2 text-sm font-bold text-red-600">
-                                            （{opt.spiciness}）
-                                          </span>
+                                  return (
+                                    <li
+                                      key={item.id}
+                                      className={`flex justify-between items-start border-b border-dashed border-gray-200 last:border-0 ${
+                                        isSideDish ? "py-2 bg-gray-50/50 -mx-4 px-4" : "pb-3 pt-2"
+                                      }`} 
+                                      /* 副食加上淺灰背景 (-mx-4 px-4 是為了讓背景色延伸到邊緣) */
+                                    >
+                                      <div className="flex-1 pr-3">
+                                        {/* 品名樣式區分 */}
+                                        <div
+                                          className={`${
+                                            isSideDish
+                                              ? "font-medium text-base text-gray-600" // 副食：字較小、顏色較淺
+                                              : "font-bold text-lg leading-tight text-gray-800" // 主食：字大、黑
+                                          }`}
+                                        >
+                                          {item.item_name}
+                                          {opt?.spiciness && opt.spiciness !== "不辣" ? (
+                                            <span className="ml-2 text-sm font-bold text-red-600">
+                                              （{opt.spiciness}）
+                                            </span>
+                                          ) : null}
+                                        </div>
+
+                                        {/* 主食才顯示單價，副食通常只需要看數量 */}
+                                        {!isSideDish && (
+                                          <div className="text-xs text-gray-400 mt-1">
+                                            ${item.price_at_time} / 份
+                                          </div>
+                                        )}
+
+                                        {/* 加點 */}
+                                        {!!opt?.addons?.length && (
+                                          <div className="mt-2 space-y-1">
+                                            {opt.addons.map((a, idx) => (
+                                              <div key={idx} className="text-sm text-gray-700">
+                                                + {a.name}{" "}
+                                                <span className="text-gray-500">x{a.quantity}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+
+                                        {/* 備註 */}
+                                        {opt?.note ? (
+                                          <div className="mt-2 text-sm text-gray-600 italic">
+                                            備註：{opt.note}
+                                          </div>
                                         ) : null}
                                       </div>
 
-                                      <div className="text-xs text-gray-400 mt-1">
-                                        ${item.price_at_time} / 份
+                                      <div className="flex flex-col items-end">
+                                        {/* 數量球樣式區分 */}
+                                        <span
+                                          className={`${
+                                            isSideDish
+                                              ? "bg-gray-200 text-gray-700 text-base px-2 py-0.5" // 副食：灰底、小
+                                              : "bg-red-100 text-red-600 px-3 py-1 text-lg" // 主食：紅底、大
+                                          } rounded-lg font-bold min-w-[2rem] text-center`}
+                                        >
+                                          x{item.quantity}
+                                        </span>
+                                        
+                                        {/* 總價稍微淡化 */}
+                                        <span className="text-xs text-gray-400 mt-1 font-mono">
+                                          ${item.price_at_time * item.quantity}
+                                        </span>
                                       </div>
-
-                                      {/* 加點 */}
-                                      {!!opt?.addons?.length && (
-                                        <div className="mt-2 space-y-1">
-                                          {opt.addons.map((a, idx) => (
-                                            <div key={idx} className="text-sm text-gray-700">
-                                              + {a.name} <span className="text-gray-500">x{a.quantity}</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-
-                                      {/* 備註 */}
-                                      {opt?.note ? (
-                                        <div className="mt-2 text-sm text-gray-600 italic">
-                                          備註：{opt.note}
-                                        </div>
-                                      ) : null}
-                                    </div>
-
-                                    <div className="flex flex-col items-end">
-                                      <span className="bg-red-100 text-red-600 px-3 py-1 rounded-lg font-bold text-lg min-w-[2.5rem] text-center">
-                                        x{item.quantity}
-                                      </span>
-                                      <span className="text-xs text-gray-400 mt-1 font-mono">
-                                        ${item.price_at_time * item.quantity}
-                                      </span>
-                                    </div>
-                                  </li>
-                                );
-                              })}
+                                    </li>
+                                  );
+                                })}
                             </ul>
                           </div>
 

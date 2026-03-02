@@ -41,6 +41,11 @@ function AdminContent() {
   const [newItemPrice, setNewItemPrice] = useState("");
   const [newItemCategory, setNewItemCategory] = useState<number>(0);
 
+  // --- 菜色編輯狀態 ---
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editItemName, setEditItemName] = useState("");
+  const [editItemPrice, setEditItemPrice] = useState("");
+
   // --- 分類編輯狀態 ---
   const [editingCatId, setEditingCatId] = useState<number | null>(null);
   const [editCatName, setEditCatName] = useState("");
@@ -146,6 +151,30 @@ function AdminContent() {
     const { error } = await supabase.from("menu_items").delete().eq("id", id);
     if (error) alert("刪除失敗：" + error.message);
     else await fetchData();
+  };
+
+  const startEditItem = (item: MenuItem) => {
+    setEditingItemId(item.id);
+    setEditItemName(item.name);
+    setEditItemPrice(String(item.price));
+  };
+
+  const saveEditItem = async (id: string) => {
+    if (!editItemName || !editItemPrice) return alert("請填寫完整資訊");
+
+    const { error } = await supabase
+      .from("menu_items")
+      .update({
+        name: editItemName,
+        price: parseInt(editItemPrice, 10),
+      })
+      .eq("id", id);
+
+    if (error) alert("更新失敗：" + error.message);
+    else {
+      setEditingItemId(null); // 關閉編輯模式
+      await fetchData();      // 重新拉取最新資料
+    }
   };
 
   // --- 分類相關功能 ---
@@ -428,30 +457,82 @@ function AdminContent() {
                   <tbody>
                     {items.map((item) => (
                       <tr key={item.id} className="hover:bg-gray-50 border-b last:border-0">
-                        <td className="p-4">
-                          <button
-                            onClick={() => toggleAvailability(item.id, item.is_available)}
-                            className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              item.is_available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                            }`}
-                          >
-                            {item.is_available ? "販售中" : "已售完"}
-                          </button>
-                        </td>
-                        <td className="p-4 text-gray-800 text-sm font-bold">
-                          {categories.find((c) => c.id === item.category_id)?.name}
-                        </td>
-                        <td className="p-4 font-bold text-black text-lg">{item.name}</td>
-                        <td className="p-4 font-mono text-blue-600 font-bold">${item.price}</td>
-                        <td className="p-4 text-right">
-                          <button
-                            onClick={() => handleDeleteItem(item.id, item.name)}
-                            className="text-red-400 hover:text-red-600 p-2"
-                            title="刪除"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </td>
+                        {editingItemId === item.id ? (
+                          /* --- 編輯模式 --- */
+                          <>
+                            <td className="p-4 text-gray-400 text-sm">編輯中...</td>
+                            <td className="p-4 text-gray-800 text-sm font-bold">
+                              {categories.find((c) => c.id === item.category_id)?.name}
+                            </td>
+                            <td className="p-4">
+                              <input
+                                type="text"
+                                value={editItemName}
+                                onChange={(e) => setEditItemName(e.target.value)}
+                                className="w-full p-1 border rounded text-black font-bold focus:border-blue-500 outline-none"
+                                autoFocus
+                              />
+                            </td>
+                            <td className="p-4">
+                              <input
+                                type="number"
+                                value={editItemPrice}
+                                onChange={(e) => setEditItemPrice(e.target.value)}
+                                className="w-20 p-1 border rounded text-black font-bold text-blue-600 focus:border-blue-500 outline-none"
+                              />
+                            </td>
+                            <td className="p-4 flex justify-end gap-2">
+                              <button
+                                onClick={() => saveEditItem(item.id)}
+                                className="bg-green-100 text-green-700 px-3 py-1 rounded flex items-center gap-1 font-bold hover:bg-green-200"
+                              >
+                                <Save size={16} /> 儲存
+                              </button>
+                              <button
+                                onClick={() => setEditingItemId(null)}
+                                className="bg-gray-100 text-gray-600 px-3 py-1 rounded flex items-center gap-1 hover:bg-gray-200"
+                              >
+                                <X size={16} /> 取消
+                              </button>
+                            </td>
+                          </>
+                        ) : (
+                          /* --- 一般檢視模式 --- */
+                          <>
+                            <td className="p-4">
+                              <button
+                                onClick={() => toggleAvailability(item.id, item.is_available)}
+                                className={`px-3 py-1 rounded-full text-xs font-bold ${
+                                  item.is_available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                                }`}
+                              >
+                                {item.is_available ? "販售中" : "已售完"}
+                              </button>
+                            </td>
+                            <td className="p-4 text-gray-800 text-sm font-bold">
+                              {categories.find((c) => c.id === item.category_id)?.name}
+                            </td>
+                            <td className="p-4 font-bold text-black text-lg">{item.name}</td>
+                            <td className="p-4 font-mono text-blue-600 font-bold">${item.price}</td>
+                            <td className="p-4 text-right flex justify-end gap-1">
+                              {/* 新增的編輯按鈕 */}
+                              <button
+                                onClick={() => startEditItem(item)}
+                                className="text-blue-500 hover:text-blue-700 p-2 bg-blue-50 rounded hover:bg-blue-100"
+                                title="編輯"
+                              >
+                                <Edit2 size={18} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteItem(item.id, item.name)}
+                                className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded"
+                                title="刪除"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>

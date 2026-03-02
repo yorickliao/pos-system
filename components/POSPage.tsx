@@ -14,7 +14,8 @@ import {
   ShoppingBag,
   X,
   ChevronDown,
-  Loader2, // 新增 Loader icon
+  Loader2,
+  Check,
 } from "lucide-react";
 
 const supabase = createClient(
@@ -1606,28 +1607,40 @@ const modalSubtotal = useMemo(() => {
         </div>
       </div>
 
+      {/* 升級版的點餐成功畫面 */}
       {successOpen && (
-        <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-lg font-black text-slate-900">下單成功</div>
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="w-full max-w-sm rounded-3xl bg-white shadow-2xl overflow-hidden animate-slide-up">
+            
+            {/* 綠色醒目 Header */}
+            <div className="bg-gradient-to-b from-green-500 to-green-600 px-6 py-8 flex flex-col items-center justify-center text-white text-center">
+              <div className="bg-white text-green-500 rounded-full p-4 mb-4 shadow-lg transform scale-110">
+                {/* 需確保頂部有 import { Check } from "lucide-react"; */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinelinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </div>
+              <h2 className="text-3xl font-black mb-1 tracking-wide">下單成功！</h2>
+              <p className="text-green-100 font-bold text-sm">請於指定時間前往取餐，並截圖保留此畫面</p>
             </div>
 
-            <div className="px-5 py-4">
-              {/* successText 是用 \n 組的，這裡用 whitespace-pre-line 保留換行 */}
-              <div className="text-slate-700 text-base whitespace-pre-line leading-7">
-                {successText}
+            {/* 訂單明細區塊 */}
+            <div className="px-6 py-6 bg-slate-50">
+              <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+                <div className="text-slate-700 text-[15px] whitespace-pre-line leading-relaxed font-bold">
+                  {successText}
+                </div>
               </div>
             </div>
 
-            <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-2">
+            {/* 底部滿版按鈕 */}
+            <div className="px-6 pb-6 bg-slate-50 flex justify-center">
               <button
                 onClick={() => setSuccessOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold hover:bg-black transition"
+                className="w-full py-4 rounded-2xl bg-slate-900 text-white font-black text-lg hover:bg-black transition-all active:scale-[0.98] shadow-xl hover:shadow-2xl"
               >
-                關閉
+                完成並關閉
               </button>
             </div>
+            
           </div>
         </div>
       )}

@@ -393,6 +393,7 @@ export default function POSPage({
   );
   const [successOpen, setSuccessOpen] = useState(false);
   const [successText, setSuccessText] = useState("");
+  const [successOrderNo, setSuccessOrderNo] = useState("");
   const [beefOffalUsed, setBeefOffalUsed] = useState(0);
   const beefOffalRemaining = Math.max(0, DAILY_BEEF_OFFAL_LIMIT - beefOffalUsed);
   const [liveMenuItems, setLiveMenuItems] = useState<MenuItem[]>(menuItems);
@@ -1022,10 +1023,11 @@ const modalSubtotal = useMemo(() => {
 
       // --- 成功後處理 ---
       const dailyNum = finalOrderData.pickup_number ? `#${finalOrderData.pickup_number}` : "--";
+      setSuccessOrderNo(dailyNum); // 👈 存入純數字/號碼
       const pickupText = formatPickupDateWeekTime(pickupTime);
       const itemsText = buildCartSummaryLines(cart);
 
-      setSuccessText(`取餐號碼：${dailyNum}\n------------------\n姓名：${customerName}\n電話：${customerPhone}\n取餐時間：${pickupText}\n\n餐點內容：\n${itemsText}\n\n總金額：$${totalAmount}`);
+      setSuccessText(`姓名：${customerName}\n電話：${customerPhone}\n取餐時間：${pickupText}\n\n餐點內容：\n${itemsText}\n\n總金額：$${totalAmount}`);
       setSuccessOpen(true);
 
       // 清空
@@ -1613,31 +1615,43 @@ const modalSubtotal = useMemo(() => {
           <div className="w-full max-w-sm rounded-3xl bg-white shadow-2xl overflow-hidden animate-slide-up">
             
             {/* 綠色醒目 Header */}
-            <div className="bg-gradient-to-b from-green-500 to-green-600 px-6 py-8 flex flex-col items-center justify-center text-white text-center">
-              <div className="bg-white text-green-500 rounded-full p-4 mb-4 shadow-lg transform scale-110">
-                {/* 需確保頂部有 import { Check } from "lucide-react"; */}
-               <Check size={36} strokeWidth={3} />
+            <div className="bg-gradient-to-b from-green-500 to-green-600 px-6 py-6 flex flex-col items-center justify-center text-white text-center">
+              <div className="bg-white/20 rounded-full p-2 mb-2">
+                <Check size={28} strokeWidth={3} />
               </div>
-              <h2 className="text-3xl font-black mb-1 tracking-wide">下單成功！</h2>
-              <p className="text-green-100 font-bold text-sm">請於指定時間前往取餐，並截圖保留此畫面</p>
+              <h2 className="text-xl font-black tracking-wide">下單成功！</h2>
             </div>
-
+      
+            {/* 🔥 新增：超大取餐號碼區塊 */}
+            <div className="px-6 pt-6 pb-2 bg-slate-50 flex flex-col items-center">
+              <div className="text-slate-500 text-xs font-black mb-1 uppercase tracking-widest">Pickup Number</div>
+              <div className="text-6xl font-black text-slate-900 tabular-nums tracking-tighter">
+                <span className="text-3xl mr-1 text-slate-400">#</span>
+                {successOrderNo}
+              </div>
+              <div className="w-12 h-1.5 bg-green-500 rounded-full mt-4"></div>
+            </div>
+      
             {/* 訂單明細區塊 */}
             <div className="px-6 py-6 bg-slate-50">
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                <div className="text-slate-700 text-[15px] whitespace-pre-line leading-relaxed font-bold">
+                {/* 提示文字 */}
+                <p className="text-center text-red-500 font-black text-sm mb-4 animate-pulse">
+                  ★ 請截圖保留此畫面 ★
+                </p>
+                <div className="text-slate-700 text-[14px] whitespace-pre-line leading-relaxed font-bold border-t border-slate-50 pt-4">
                   {successText}
                 </div>
               </div>
             </div>
-
+      
             {/* 底部滿版按鈕 */}
             <div className="px-6 pb-6 bg-slate-50 flex justify-center">
               <button
                 onClick={() => setSuccessOpen(false)}
-                className="w-full py-4 rounded-2xl bg-slate-900 text-white font-black text-lg hover:bg-black transition-all active:scale-[0.98] shadow-xl hover:shadow-2xl"
+                className="w-full py-4 rounded-2xl bg-slate-900 text-white font-black text-lg hover:bg-black transition-all active:scale-[0.98] shadow-xl"
               >
-                完成並關閉
+                完成
               </button>
             </div>
             

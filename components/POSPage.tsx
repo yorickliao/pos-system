@@ -1074,7 +1074,7 @@ const modalSubtotal = useMemo(() => {
                 <li>僅收現金</li>
                 <li>僅限外帶</li>
                 <li>請勿提早到（不好停車）</li>
-                <li>暫不提供分裝，如需分裝請自行攜帶購物袋</li>
+                <li>菜價上漲，不提供換菜及加菜，請見諒。</li>
               </ul>
 
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">

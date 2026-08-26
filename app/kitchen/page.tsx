@@ -55,7 +55,7 @@ const DAILY_BEEF_OFFAL_LIMIT = 50;
 const BEEF_OFFAL_NAME = "牛雜鍋";
 const UNLIMITED_SLOTS = new Set(["16:30", "20:30"]);
 const isUnlimitedSlot = (hhmm: string) => UNLIMITED_SLOTS.has(hhmm);
-const SIDE_DISHES = new Set(["白飯", "冬粉", "科學麵"]);
+const SIDE_DISHES = new Set(["白飯", "冬粉", "科學麵", "泡麵"]);
 
 
 // 營業時段（依你規則固定 16:30–20:30，每 15 分鐘）

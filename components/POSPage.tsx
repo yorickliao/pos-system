@@ -1070,7 +1070,7 @@ const modalSubtotal = useMemo(() => {
 
             <div className="px-6 py-5 text-slate-800 space-y-4">
               <ul className="list-disc pl-5 space-y-2 font-bold">
-                <li>一律不附白飯／冬粉／科學麵</li>
+                <li>一律不附白飯／冬粉／泡麵</li>
                 <li>僅收現金</li>
                 <li>僅限外帶</li>
                 <li>請勿提早到（不好停車）</li>
